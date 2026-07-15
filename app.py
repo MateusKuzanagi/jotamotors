@@ -311,6 +311,9 @@ if menu == "📊 Dashboard & Estoque":
             buffer.seek(0)
             return buffer.getvalue()
         
+            buffer.seek(0)
+            return buffer.getvalue()
+        
         pdf_estoque = exportar_produtos_pdf_bytes(dados_produtos)
         st.download_button(
             label="📕 Baixar PDF Estoque",
@@ -495,7 +498,7 @@ elif menu == "👥 Gestão de Clientes":
                     
                     col_os1, col_os2 = st.columns(2)
                     with col_os1:
-                        os_total = st.number_input("Valor Total do Orçamento (R$)", min_value=0.0, step=0.01)
+                        os_total = st.number_input("Valor Total Orçamento (R$)", min_value=0.0, step=0.01)
                     with col_os2:
                         os_pago = st.number_input("Valor Pago de Adiantamento (R$)", min_value=0.0, step=0.01)
                     
@@ -635,7 +638,7 @@ elif menu == "👥 Gestão de Clientes":
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
                 # =========================================================
-                # NOVO: SEÇÃO DE EDIÇÃO DIRETA DE VALORES (SINALIZADA E SEGURA COM CHAVES ÚNICAS)
+                # EDIÇÃO DIRETA DE VALORES (FINALIZADA E CORRIGIDA)
                 # =========================================================
                 st.write("")
                 st.markdown("### ✏️ Editar Valores / Registrar Pagamentos")
@@ -649,7 +652,7 @@ elif menu == "👥 Gestão de Clientes":
                     os_pago = float(os_item[4] or 0.0)
                     os_pendente = os_total - os_pago
                     
-                    # Definindo se está quitada ou pendente para facilitar a visualização do usuário
+                    # Definindo se está quitada ou pendente
                     if os_pendente > 0:
                         status_label = f"🔴 Em Aberto (Falta pagar: R$ {os_pendente:.2f})"
                     else:
@@ -664,16 +667,16 @@ elif menu == "👥 Gestão de Clientes":
                             with col_eo1:
                                 eo_total = st.number_input("Valor Total Orçado (R$)", min_value=0.0, step=0.01, value=os_total, key=f"tot_{os_id}")
                             with col_eo2:
-                                eo_pago = st.number_input("Valor Pago pelo Cliente (R$)", min_value=0.0, step=0.01, value=os_pago, key=f"pag_{os_id}")
+                                # CORREÇÃO DA LINHA CORTADA DO INPUT DO USUÁRIO
+                                eo_pago = st.number_input("Valor Pago pelo Cliente (R$)", min_value=0.0, step=0.01, value=os_pago, key=f"pago_{os_id}")
                             
-                            # Botões de ação com chaves de identificação únicas
-                            col_ebtn1, col_ebtn2 = st.columns(2)
-                            with col_ebtn1:
-                                btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES", use_container_width=True, key=f"btn_save_{os_id}")
-                            with col_ebtn2:
-                                btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True, key=f"btn_del_{os_id}")
-                                
-                            if btn_salvar_os:
+                            col_os_btn1, col_os_btn2 = st.columns(2)
+                            with col_os_btn1:
+                                os_salvar = st.form_submit_button("💾 SALVAR ALTERAÇÕES", use_container_width=True)
+                            with col_os_btn2:
+                                os_excluir = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
+                            
+                            if os_salvar:
                                 conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                                 cursor = conexao.cursor()
                                 cursor.execute("UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?", 
@@ -683,186 +686,232 @@ elif menu == "👥 Gestão de Clientes":
                                 st.success(f"OS #{os_id} atualizada com sucesso!")
                                 st.rerun()
                                 
-                            if btn_deletar_os:
+                            if os_excluir:
                                 conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                                 cursor = conexao.cursor()
-                                # Estorna as peças de volta ao estoque
-                                v_estorno = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id,)).fetchone()
-                                if v_estorno and v_estorno[0] and (v_estorno[1] or 0) > 0:
-                                    cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (v_estorno[1], v_estorno[0]))
-                                    
+                                # Devolver o item ao estoque ao deletar a OS
+                                os_info = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id,)).fetchone()
+                                if os_info and os_info[0] and (os_info[1] or 0) > 0:
+                                    cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (os_info[1], os_info[0]))
+                                
                                 cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id,))
                                 conexao.commit()
                                 conexao.close()
-                                st.success(f"OS #{os_id} removida e estoque recalculado!")
+                                st.success(f"OS #{os_id} removida com sucesso!")
                                 st.rerun()
 
-                st.divider()
+                # =========================================================
+                # NOVO: EXPORTADOR DE EXTRATO/ORÇAMENTO EM PDF DO CLIENTE
+                # =========================================================
+                st.write("")
+                st.markdown("### 🖨️ Imprimir Prontuário / PDF")
                 
-                # Gerar PDF do Extrato (Incluindo Placa no Cabeçalho)
-                def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
+                def exportar_cliente_pdf_bytes(cli_meta, historico):
                     buffer = io.BytesIO()
                     c = canvas.Canvas(buffer, pagesize=letter)
-                    c.setFont("Helvetica-Bold", 16)
-                    c.drawString(50, 750, "EXTRATO DE SERVIÇOS - JOTAMOTORS")
-
-                    c.setFont("Helvetica", 11)
-                    c.drawString(50, 720, f"Cliente: {c_meta[0]}")
-                    c.drawString(50, 700, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) | Placa: {c_meta[8] or 'N/A'}")
-                    c.drawString(50, 680, f"Entrada/Saída: {c_meta[6] or '-'} / {c_meta[7] or '-'} | KM: {c_meta[4] or '-'} / {c_meta[5] or '-'}")
-                    c.line(50, 670, 550, 670)
-
-                    c.setFont("Helvetica-Bold", 10)
-                    c.drawString(50, 650, "DATA")
-                    c.drawString(150, 650, "DESCRIÇÃO")
-                    c.drawString(450, 650, "VALOR")
-                    c.line(50, 645, 550, 645)
-
-                    y = 620
+                    
+                    # Cabeçalho do PDF
+                    c.setFillColor(HexColor("#020617"))
+                    c.setFont("Helvetica-Bold", 18)
+                    c.drawString(50, 750, "JotaMotors - Ficha Financeira de Prontuário")
+                    
                     c.setFont("Helvetica", 10)
-                    total_extrato = 0.0
-
-                    for d in vendas_lista:
-                        if y < 50:
+                    c.setFillColor(HexColor("#475569"))
+                    c.drawString(50, 732, f"Data do Relatório: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+                    c.line(50, 722, 560, 722)
+                    
+                    # Bloco de Informações do Cliente
+                    c.setFillColor(HexColor("#0f172a"))
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(50, 702, f"Cliente: {cli_meta[0]}")
+                    c.setFont("Helvetica", 10)
+                    c.drawString(50, 682, f"Telefone: {cli_meta[1] or 'Não Informado'}")
+                    c.drawString(50, 667, f"Moto: {cli_meta[2] or 'Não Informada'} (Ano: {cli_meta[3] or 'N/A'}) | Placa: {cli_meta[8] or 'N/A'}")
+                    c.drawString(50, 652, f"KM Entrada/Saída: {cli_meta[4] or '-'} / {cli_meta[5] or '-'}")
+                    c.drawString(50, 637, f"Período na Oficina: {cli_meta[6] or '-'} até {cli_meta[7] or '-'}")
+                    c.line(50, 622, 560, 622)
+                    
+                    # Títulos da Tabela de Serviços
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(50, 602, "OS #")
+                    c.drawString(100, 602, "Data")
+                    c.drawString(180, 602, "Serviços & Peças de Reposição")
+                    c.drawString(400, 602, "Total (R$)")
+                    c.drawString(480, 602, "Pago (R$)")
+                    c.line(50, 592, 560, 592)
+                    
+                    y = 572
+                    total_orcado = 0.0
+                    total_pago = 0.0
+                    c.setFont("Helvetica", 9)
+                    c.setFillColor(HexColor("#1e293b"))
+                    
+                    for os_item in historico:
+                        if y < 80:
                             c.showPage()
                             y = 750
-                        c.drawString(50, y, str(d[1]))
-                        c.drawString(150, y, str(d[2])[:50]) 
-                        c.drawString(450, y, f"R$ {d[3]:.2f}")
-                        total_extrato += float(d[3] or 0.0)
+                            c.setFont("Helvetica-Bold", 10)
+                            c.drawString(50, 770, "OS #")
+                            c.drawString(100, 770, "Data")
+                            c.drawString(180, 770, "Serviços & Peças de Reposição")
+                            c.drawString(400, 770, "Total (R$)")
+                            c.drawString(480, 770, "Pago (R$)")
+                            c.line(50, 760, 560, 760)
+                            c.setFont("Helvetica", 9)
+                            
+                        c.drawString(50, y, f"#{os_item[0]}")
+                        c.drawString(100, y, str(os_item[1])[:10])
+                        c.drawString(180, y, str(os_item[2])[:38])
+                        c.drawString(400, y, f"{os_item[3]:.2f}")
+                        c.drawString(480, y, f"{os_item[4]:.2f}")
+                        
+                        total_orcado += float(os_item[3] or 0.0)
+                        total_pago += float(os_item[4] or 0.0)
                         y -= 20
-
-                    c.line(50, y-10, 550, y-10)
-                    c.setFont("Helvetica-Bold", 12)
-                    c.drawString(350, y-30, f"TOTAL: R$ {total_extrato:.2f}")
-
+                        
+                    c.line(50, y + 10, 560, y + 10)
+                    y -= 10
+                    
+                    # Totalizadores finais
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(240, y, "TOTAIS ACUMULADOS:")
+                    c.drawString(400, y, f"R$ {total_orcado:.2f}")
+                    c.drawString(480, y, f"R$ {total_pago:.2f}")
+                    
+                    y -= 20
+                    saldo_devedor = total_orcado - total_pago
+                    if saldo_devedor > 0:
+                        c.setFillColor(HexColor("#ef4444")) # Vermelho para débito
+                        c.drawString(240, y, f"SALDO EM ABERTO: R$ {saldo_devedor:.2f}")
+                    else:
+                        c.setFillColor(HexColor("#10b981")) # Verde para quitado
+                        c.drawString(240, y, "STATUS FINANCEIRO: QUITADO")
+                    
                     c.save()
                     buffer.seek(0)
                     return buffer.getvalue()
-                    
-                pdf_extrato = gerar_extrato_pdf_bytes(historico, cli_meta)
+                
+                pdf_cliente = exportar_cliente_pdf_bytes(cli_meta, historico)
                 st.download_button(
-                    label="🖨️ Exportar Extrato Completo (PDF)",
-                    data=pdf_extrato,
-                    file_name=f"extrato_{cli_meta[0].replace(' ', '_').lower()}.pdf",
-                    mime="application/pdf"
+                    label="📄 Gerar Extrato / Fatura PDF",
+                    data=pdf_cliente,
+                    file_name=f"extrato_{cli_meta[0].replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
                 )
             else:
-                st.warning("Este cliente não possui histórico de Ordens de Serviços cadastradas.")
+                st.info("Nenhum registro de serviço ou venda associado a este cliente.")
 
 # ==========================================
-# ABA 3: DESEMPENHO FINANCEIRO DO MÊS
+# ABA 3: DESEMPENHO DO MÊS (DESENVOLVIDO POR COMPLETO)
 # ==========================================
 elif menu == "📈 Desempenho do Mês":
-    st.subheader("📊 Faturamento do Mês Consolidado")
+    st.subheader("📈 Relatório Mensal de Caixa e Faturamento")
     
-    hoje = datetime.now()
-    mes_atual_str = hoje.strftime("/%m/%Y")
-
     conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
     cursor = conexao.cursor()
-    cursor.execute("SELECT ValorPago, DataCompra FROM Vendas WHERE DataCompra LIKE ?", (f"%{mes_atual_str}%",))
-    vendas = cursor.fetchall()
+    cursor.execute("""
+        SELECT V.ID, V.DataCompra, V.Servico, V.ValorTotal, V.ValorPago, C.Nome 
+        FROM Vendas V
+        LEFT JOIN Clientes C ON V.ClienteID = C.ID
+        ORDER BY V.ID DESC
+    """)
+    historico_vendas_geral = cursor.fetchall()
     conexao.close()
-
-    num_dias = calendar.monthrange(hoje.year, hoje.month)[1]
-    faturamento_diario = {d: 0.0 for d in range(1, num_dias + 1)}
-
-    for valor, data_str in vendas:
-        if valor is None or not data_str:
-            continue
-        try:
-            dia = int(data_str.split()[0].split('/')[0])
-            if dia in faturamento_diario:
-                faturamento_diario[dia] += float(valor)
-        except Exception:
-            pass
-
-    dias = list(faturamento_diario.keys())
-    valores = list(faturamento_diario.values())
-    total_mes = sum(valores)
     
-    col_fat1, col_fat2 = st.columns([3, 1])
-    with col_fat1:
-        st.info(f"**Fechamento Parcial:** O faturamento atual para o mês de **{hoje.strftime('%B/%Y').upper()}** é de **R$ {total_mes:,.2f}**")
-    
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(12, 4))
-    fig.patch.set_facecolor('#0f172a')
-    ax.set_facecolor('#0f172a')
-    
-    ax.spines['bottom'].set_color('#334155')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#334155')
-
-    ax.tick_params(axis='x', colors='#94a3b8', labelsize=9)
-    ax.tick_params(axis='y', colors='#94a3b8', labelsize=9)
-    ax.yaxis.grid(True, linestyle='--', alpha=0.15, color='#e2e8f0')
-
-    ax.plot(dias, valores, color='#06b6d4', marker='o', linewidth=2, markersize=4, label='Faturamento Diário')
-    ax.fill_between(dias, valores, color='#06b6d4', alpha=0.12)
-
-    ax.set_title("Movimentação Diária de Caixa (R$)", color='#f8fafc', fontsize=12, pad=12, fontweight='bold')
-    ax.set_xlabel("Dia do Mês", color='#94a3b8', fontsize=9, labelpad=8)
-    ax.set_xticks([d for d in dias if d % 2 != 0 or d == 1 or d == num_dias])
-    
-    st.pyplot(fig)
-    
-    # PDF de Desempenho com o gráfico integrado
-    def exportar_grafico_pdf_bytes(tot_mes, dias_tot, d_eixo, v_eixo):
-        img_buf = io.BytesIO()
-        fig.savefig(img_buf, format='png', dpi=300, bbox_inches='tight', facecolor='#0f172a')
-        img_buf.seek(0)
-
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=letter)
-        largura, altura = letter
-
-        c.setFillColor(HexColor(COR_BG))
-        c.rect(0, 0, largura, altura, fill=True, stroke=False)
-
-        c.setFillColor(HexColor(COR_HEADER))
-        c.rect(0, altura - 80, largura, 80, fill=True, stroke=False)
-
-        c.setFillColor(HexColor(COR_ACCENT_CYAN))
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(40, altura - 45, "JOTAMOTORS - RELATÓRIO DE DESEMPENHO")
-
-        c.setFillColor(HexColor(COR_TEXT_MUTED))
-        c.setFont("Helvetica", 10)
-        c.drawString(40, altura - 65, f"Gerado em: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
-
-        c.setFillColor(HexColor(COR_CARD))
-        c.roundRect(40, altura - 180, largura - 80, 80, 8, stroke=False, fill=True)
-
-        c.setFillColor(HexColor(COR_TEXT))
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(60, altura - 130, "Faturamento Total Acumulado no Mês")
-
-        c.setFillColor(HexColor(COR_ACCENT_GREEN))
-        c.setFont("Helvetica-Bold", 20)
-        c.drawString(60, altura - 165, f"R$ {tot_mes:,.2f}")
-
-        from reportlab.lib.utils import ImageReader
-        img_reader = ImageReader(img_buf)
-        c.drawImage(img_reader, 40, 120, width=largura - 80, height=280)
-
-        c.setFillColor(HexColor(COR_TEXT_MUTED))
-        c.setFont("Helvetica", 9)
-        c.drawCentredString(largura / 2, 45, "JotaMotors ERP - Software de Gestão e Administração")
-
-        c.save()
-        buffer.seek(0)
-        return buffer.getvalue()
-
-    pdf_desempenho_dados = exportar_grafico_pdf_bytes(total_mes, num_dias, dias, valores)
-    
-    with col_fat2:
-        st.download_button(
-            label="📕 Baixar PDF Desempenho",
-            data=pdf_desempenho_dados,
-            file_name=f"faturamento_{hoje.strftime('%m_%Y')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+    if historico_vendas_geral:
+        df_vendas = pd.DataFrame(historico_vendas_geral, columns=["ID OS", "Data", "Serviço/Peça", "Valor Total (R$)", "Valor Pago (R$)", "Cliente"])
+        df_vendas["Valor Total (R$)"] = df_vendas["Valor Total (R$)"].fillna(0.0)
+        df_vendas["Valor Pago (R$)"] = df_vendas["Valor Pago (R$)"].fillna(0.0)
+        df_vendas["Pendente (R$)"] = df_vendas["Valor Total (R$)"] - df_vendas["Valor Pago (R$)"]
+        
+        # Estatísticas principais
+        tot_geral_faturado = df_vendas["Valor Total (R$)"].sum()
+        tot_geral_recebido = df_vendas["Valor Pago (R$)"].sum()
+        tot_geral_pendente = df_vendas["Pendente (R$)"].sum()
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            with st.container(border=True):
+                st.metric("📊 Faturamento Bruto (Orçado)", f"R$ {tot_geral_faturado:,.2f}")
+        with col_m2:
+            with st.container(border=True):
+                st.metric("🟢 Valor Efetivamente Recebido", f"R$ {tot_geral_recebido:,.2f}", 
+                          delta=f"{tot_geral_recebido/tot_geral_faturado*100:.1f}% do total" if tot_geral_faturado > 0 else "0.0%")
+        with col_m3:
+            with st.container(border=True):
+                st.metric("🔴 Contas a Receber (Pendente)", f"R$ {tot_geral_pendente:,.2f}", 
+                          delta="- Crítico" if tot_geral_pendente > 0 else "OK", delta_color="inverse")
+                
+        st.write("")
+        st.markdown("### 📊 Gráficos de Controle Financeiro")
+        
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            with st.container(border=True):
+                st.markdown("**Comparativo de Fluxo de Caixa**")
+                
+                # Gráfico estilizado com o tema escuro do JotaMotors
+                fig, ax = plt.subplots(figsize=(6, 4))
+                fig.patch.set_facecolor('#0f172a') # COR_BG
+                ax.set_facecolor('#1e293b') # COR_CARD
+                
+                categorias = ['Faturamento Bruto', 'Total Recebido', 'Total Pendente']
+                valores = [tot_geral_faturado, tot_geral_recebido, tot_geral_pendente]
+                cores = ['#3b82f6', '#10b981', '#ef4444'] # Azul, Verde, Vermelho
+                
+                barras = ax.bar(categorias, valores, color=cores, width=0.5)
+                ax.tick_params(colors='#f8fafc', labelsize=10)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['left'].set_color('#334155')
+                ax.spines['bottom'].set_color('#334155')
+                ax.yaxis.grid(True, linestyle='--', alpha=0.3, color='#94a3b8')
+                ax.set_axisbelow(True)
+                
+                for bar in barras:
+                    height = bar.get_height()
+                    ax.annotate(f'R$ {height:,.2f}',
+                                xy=(bar.get_x() + bar.get_width() / 2, height),
+                                xytext=(0, 3),
+                                textcoords="offset points",
+                                ha='center', va='bottom', color='#f8fafc', fontsize=9)
+                                
+                st.pyplot(fig)
+                
+        with col_g2:
+            with st.container(border=True):
+                st.markdown("**Clientes que Mais Geraram Receita (Top 5)**")
+                
+                # Agrupamento para ranking de clientes
+                df_ranking = df_vendas.groupby("Cliente")["Valor Total (R$)"].sum().reset_index()
+                df_ranking = df_ranking.sort_values(by="Valor Total (R$)", ascending=False).head(5)
+                
+                if not df_ranking.empty:
+                    fig2, ax2 = plt.subplots(figsize=(6, 4))
+                    fig2.patch.set_facecolor('#0f172a')
+                    ax2.set_facecolor('#1e293b')
+                    
+                    y_pos = range(len(df_ranking))
+                    barras2 = ax2.barh(y_pos, df_ranking["Valor Total (R$)"], color='#06b6d4', height=0.5) # COR_ACCENT_CYAN
+                    ax2.set_yticks(y_pos)
+                    ax2.set_yticklabels(df_ranking["Cliente"], color='#f8fafc', fontsize=10)
+                    ax2.tick_params(colors='#f8fafc', labelsize=10)
+                    ax2.invert_yaxis()
+                    ax2.spines['top'].set_visible(False)
+                    ax2.spines['right'].set_visible(False)
+                    ax2.spines['left'].set_color('#334155')
+                    ax2.spines['bottom'].set_color('#334155')
+                    ax2.xaxis.grid(True, linestyle='--', alpha=0.3, color='#94a3b8')
+                    ax2.set_axisbelow(True)
+                    
+                    st.pyplot(fig2)
+                else:
+                    st.info("Dados de faturamento insuficientes para gerar o ranking.")
+                    
+        st.write("")
+        st.markdown("### 📜 Detalhamento Histórico de Todas as OSs")
+        st.dataframe(df_vendas, use_container_width=True, hide_index=True)
+        
+    else:
+        st.info("Nenhuma ordem de serviço lançada para o cálculo de desempenho financeiro.")
