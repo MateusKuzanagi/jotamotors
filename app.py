@@ -573,50 +573,43 @@ elif menu == "👥 Gestão de Clientes":
             st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
             if historico:
-                df_hist = pd.DataFrame(historico, columns=["OS #", "Data da OS", "Serviços & Peças de Reposição", "Total Orçado (R$)", "Total Pago (R$)"])
-                st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                # 1. PREPARAÇÃO DO DATAFRAME EDITÁVEL
+                df_hist = pd.DataFrame(historico, columns=["ID", "Data da OS", "Serviços & Peças", "Total Orçado (R$)", "Total Pago (R$)"])
                 
-                # Gerar PDF do Extrato (Incluindo Placa no Cabeçalho)
-                def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
-                    buffer = io.BytesIO()
-                    c = canvas.Canvas(buffer, pagesize=letter)
-                    c.setFont("Helvetica-Bold", 16)
-                    c.drawString(50, 750, "EXTRATO DE SERVIÇOS - JOTAMOTORS")
+                st.markdown("### ✏️ Edição do Histórico Financeiro")
+                st.caption("Edite os campos de Serviço, Valor Total e Valor Pago abaixo e clique em salvar:")
 
-                    c.setFont("Helvetica", 11)
-                    c.drawString(50, 720, f"Cliente: {c_meta[0]}")
-                    c.drawString(50, 700, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) | Placa: {c_meta[8] or 'N/A'}")
-                    c.drawString(50, 680, f"Entrada/Saída: {c_meta[6] or '-'} / {c_meta[7] or '-'} | KM: {c_meta[4] or '-'} / {c_meta[5] or '-'}")
-                    c.line(50, 670, 550, 670)
+                # 2. COMPONENTE DE EDIÇÃO
+                df_editado = st.data_editor(
+                    df_hist,
+                    column_config={
+                        "ID": None, # Esconde o ID na interface, mas ele continua no df
+                        "Data da OS": st.column_config.TextColumn("Data", disabled=True),
+                        "Serviços & Peças": st.column_config.TextColumn("Serviço", width="large"),
+                        "Total Orçado (R$)": st.column_config.NumberColumn("Total (R$)", format="R$ %.2f"),
+                        "Total Pago (R$)": st.column_config.NumberColumn("Pago (R$)", format="R$ %.2f"),
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
 
-                    c.setFont("Helvetica-Bold", 10)
-                    c.drawString(50, 650, "DATA")
-                    c.drawString(150, 650, "DESCRIÇÃO")
-                    c.drawString(450, 650, "VALOR")
-                    c.line(50, 645, 550, 645)
+                # 3. BOTÃO DE SALVAR
+                if st.button("💾 Salvar Alterações do Histórico"):
+                    conexao = sqlite3.connect(BANCO_DADOS)
+                    cursor = conexao.cursor()
+                    for _, row in df_editado.iterrows():
+                        cursor.execute("""
+                            UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?
+                        """, (row['Serviços & Peças'], row['Total Orçado (R$)'], row['Total Pago (R$)'], row['ID']))
+                    conexao.commit()
+                    conexao.close()
+                    st.success("Histórico atualizado com sucesso!")
+                    st.rerun()
 
-                    y = 620
-                    c.setFont("Helvetica", 10)
-                    total_extrato = 0.0
+                st.divider()
 
-                    for d in vendas_lista:
-                        if y < 50:
-                            c.showPage()
-                            y = 750
-                        c.drawString(50, y, str(d[1]))
-                        c.drawString(150, y, str(d[2])[:50]) 
-                        c.drawString(450, y, f"R$ {d[3]:.2f}")
-                        total_extrato += float(d[3] or 0.0)
-                        y -= 20
-
-                    c.line(50, y-10, 550, y-10)
-                    c.setFont("Helvetica-Bold", 12)
-                    c.drawString(350, y-30, f"TOTAL: R$ {total_extrato:.2f}")
-
-                    c.save()
-                    buffer.seek(0)
-                    return buffer.getvalue()
-                    
+                # 4. EXPORTAÇÃO PDF (Mantenha sua função original)
+                # [Aqui entra a sua função gerar_extrato_pdf_bytes que já existia no seu código]
                 pdf_extrato = gerar_extrato_pdf_bytes(historico, cli_meta)
                 st.download_button(
                     label="🖨️ Exportar Extrato Completo (PDF)",
@@ -626,7 +619,6 @@ elif menu == "👥 Gestão de Clientes":
                 )
             else:
                 st.warning("Este cliente não possui histórico de Ordens de Serviços cadastradas.")
-
 # ==========================================
 # ABA 3: DESEMPENHO FINANCEIRO DO MÊS
 # ==========================================
