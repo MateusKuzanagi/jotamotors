@@ -9,6 +9,7 @@ from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.colors import HexColor
+from reportlab.lib.utils import ImageReader
 
 # Configuração da página do site
 st.set_page_config(
@@ -21,7 +22,7 @@ st.set_page_config(
 BANCO_DADOS = "JotaMotors_Completo.db"
 
 # Identidade Visual do JotaMotors
-COR_BG = "#0f172a"          
+COR_BG = "#0f172a"        
 COR_CARD = "#1e293b"        
 COR_HEADER = "#020617"      
 COR_TEXT = "#f8fafc"        
@@ -72,6 +73,89 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# FUNÇÕES DE EXPORTAÇÃO PDF AUXILIARES
+# ==========================================
+def gerar_extrato_pdf_bytes(historico, cli_meta):
+    """
+    Gera o extrato de ordens de serviço do cliente em formato PDF personalizado.
+    """
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    largura, altura = letter
+
+    # Cabeçalho do Extrato
+    c.setFillColor(HexColor(COR_HEADER))
+    c.rect(0, altura - 100, largura, 100, fill=True, stroke=False)
+    
+    c.setFillColor(HexColor(COR_ACCENT_CYAN))
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(40, altura - 45, "JOTAMOTORS - EXTRATO DO CLIENTE")
+    
+    c.setFillColor(HexColor(COR_TEXT_MUTED))
+    c.setFont("Helvetica", 10)
+    c.drawString(40, altura - 75, f"Gerado em: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
+
+    # Prontuário e Ficha do Cliente
+    c.setFillColor(HexColor(COR_CARD))
+    c.roundRect(40, altura - 230, largura - 80, 110, 6, fill=True, stroke=False)
+    
+    c.setFillColor(HexColor(COR_TEXT))
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(55, altura - 135, f"Cliente: {cli_meta[0]}")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(55, altura - 155, f"Telefone: {cli_meta[1] or 'Não cadastrado'}")
+    c.drawString(55, altura - 175, f"Moto: {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'})")
+    c.drawString(55, altura - 195, f"Placa: {cli_meta[8] or 'N/A'}")
+    
+    c.drawString(320, altura - 155, f"KM Entrada / Saída: {cli_meta[4] or '-'} / {cli_meta[5] or '-'}")
+    c.drawString(320, altura - 175, f"Entrada Oficina: {cli_meta[6] or '-'}")
+    c.drawString(320, altura - 195, f"Saída Oficina: {cli_meta[7] or '-'}")
+
+    # Tabela de Serviços
+    c.setFillColor(HexColor("#000000"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, altura - 265, "HISTÓRICO DE ORDENS DE SERVIÇO")
+    c.line(40, altura - 270, largura - 40, altura - 270)
+
+    # Cabeçalho da tabela
+    y = altura - 290
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(40, y, "DATA")
+    c.drawString(140, y, "SERVIÇO / PEÇAS")
+    c.drawString(400, y, "TOTAL ORÇADO")
+    c.drawString(500, y, "TOTAL PAGO")
+    
+    y -= 10
+    c.line(40, y, largura - 40, y)
+    y -= 15
+
+    c.setFont("Helvetica", 9)
+    for row in historico:
+        if y < 60:
+            c.showPage()
+            y = altura - 60
+            c.setFont("Helvetica", 9)
+        
+        # Desempacotando dados
+        # historico = (ID, DataCompra, Servico, ValorTotal, ValorPago)
+        data_compra = str(row[1])
+        servico = str(row[2])
+        v_total = row[3] if row[3] is not None else 0.0
+        v_pago = row[4] if row[4] is not None else 0.0
+        
+        c.drawString(40, y, data_compra[:10])
+        c.drawString(140, y, servico[:45])
+        c.drawString(400, y, f"R$ {v_total:,.2f}")
+        c.drawString(500, y, f"R$ {v_pago:,.2f}")
+        y -= 18
+
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
 
 # ==========================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -608,8 +692,7 @@ elif menu == "👥 Gestão de Clientes":
 
                 st.divider()
 
-                # 4. EXPORTAÇÃO PDF (Mantenha sua função original)
-                # [Aqui entra a sua função gerar_extrato_pdf_bytes que já existia no seu código]
+                # 4. EXPORTAÇÃO PDF (Chamando a função implementada no escopo superior)
                 pdf_extrato = gerar_extrato_pdf_bytes(historico, cli_meta)
                 st.download_button(
                     label="🖨️ Exportar Extrato Completo (PDF)",
@@ -690,6 +773,7 @@ elif menu == "📈 Desempenho do Mês":
         c = canvas.Canvas(buffer, pagesize=letter)
         largura, altura = letter
 
+        # Plano de fundo escuro para consistência visual
         c.setFillColor(HexColor(COR_BG))
         c.rect(0, 0, largura, altura, fill=True, stroke=False)
 
@@ -707,48 +791,26 @@ elif menu == "📈 Desempenho do Mês":
         c.setFillColor(HexColor(COR_CARD))
         c.roundRect(40, altura - 180, largura - 80, 80, 8, fill=True, stroke=False)
 
-        c.setFillColor(HexColor(COR_ACCENT_GREEN))
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(60, altura - 130, f"Receita Total Acumulada: R$ {tot_mes:.2f}")
-
+        # Escrevendo as métricas de faturamento
         c.setFillColor(HexColor(COR_TEXT))
-        c.setFont("Helvetica", 11)
-        c.drawString(60, altura - 155, f"Referência: {hoje.strftime('%B / %Y').upper()}")
-        c.drawRightString(largura - 60, altura - 155, f"Dias Corridos: {hoje.day} de {dias_tot}")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(60, altura - 130, "FATURAMENTO TOTAL DO MÊS")
+        
+        c.setFillColor(HexColor(COR_ACCENT_GREEN))
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(60, altura - 155, f"R$ {tot_mes:,.2f}")
 
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-            tmp.write(img_buf.getvalue())
-            tmp_path = tmp.name
-
-        grafico_y = altura - 190 - 330
-        c.drawImage(tmp_path, 40, grafico_y, width=largura - 80, height=310)
-
-        c.setStrokeColor(HexColor(COR_CARD))
-        c.setLineWidth(1)
-        c.line(40, 150, largura - 40, 150)
-
-        c.setFillColor(HexColor(COR_TEXT_MUTED))
-        c.setFont("Helvetica-Oblique", 9)
-        c.drawString(40, 125, "* Dados computados a partir das vendas registradas no fechamento deste relatório.")
-        c.drawString(40, 110, "Página 1 de 1")
+        # Inserindo a imagem gerada do Matplotlib no PDF
+        c.drawImage(ImageReader(img_buf), 40, 100, width=largura - 80, height=280)
 
         c.save()
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
-            
         buffer.seek(0)
         return buffer.getvalue()
 
-    pdf_faturamento = exportar_grafico_pdf_bytes(total_mes, num_dias, dias, valores)
-    
-    with col_fat2:
-        st.download_button(
-            label="📕 Exportar Relatório PDF",
-            data=pdf_faturamento,
-            file_name=f"fechamento_mensal_{hoje.strftime('%m_%Y')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+    pdf_performance = exportar_grafico_pdf_bytes(total_mes, dias, faturamento_diario.keys(), faturamento_diario.values())
+    st.download_button(
+        label="📊 Exportar PDF de Performance",
+        data=pdf_performance,
+        file_name="relatorio_desempenho_jotamotors.pdf",
+        mime="application/pdf"
+    )
