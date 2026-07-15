@@ -702,30 +702,42 @@ elif menu == "📈 Desempenho do Mês":
     valores = list(faturamento_diario.values())
     total_mes = sum(valores)
     
-    col_fat1, col_fat2 = st.columns([3, 1])
-    with col_fat1:
-        st.info(f"**Fechamento Parcial:** O faturamento atual para o mês de **{hoje.strftime('%B/%Y').upper()}** é de **R$ {total_mes:,.2f}**")
+    # Organização das métricas em colunas
+    col_metrica1, col_metrica2 = st.columns(2)
+    with col_metrica1:
+        with st.container(border=True):
+            st.metric("💰 Faturamento Total do Mês", f"R$ {total_mes:,.2f}")
+            
+    with col_metrica2:
+        with st.container(border=True):
+            media_diaria = total_mes / num_dias
+            st.metric("📅 Média Diária Estimada", f"R$ {media_diaria:,.2f}")
+
+    st.write("")
+    st.markdown("### 📊 Histórico de Evolução Diária")
     
-    # Gráfico do faturamento diário
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(12, 4))
-    fig.patch.set_facecolor('#0f172a')
-    ax.set_facecolor('#0f172a')
+    # Configuração e renderização do gráfico usando Matplotlib alinhado ao tema escuro
+    fig, ax = plt.subplots(figsize=(10, 4), facecolor=COR_BG)
+    ax.set_facecolor(COR_CARD)
     
-    ax.spines['bottom'].set_color('#334155')
+    # Plotagem da linha de faturamento diário
+    ax.plot(dias, valores, color=COR_ACCENT_CYAN, marker='o', markersize=4, linewidth=2, label="Faturamento")
+    ax.fill_between(dias, valores, color=COR_ACCENT_CYAN, alpha=0.15)
+    
+    # Personalização dos eixos e textos
+    ax.set_title(f"Faturamento Diário - {hoje.strftime('%m/%Y')}", color=COR_TEXT, fontsize=12, pad=15)
+    ax.set_xlabel("Dia do Mês", color=COR_TEXT_MUTED, fontsize=10)
+    ax.set_ylabel("Valor (R$)", color=COR_TEXT_MUTED, fontsize=10)
+    
+    # Ajustando cores das bordas e marcações para o tema dark
+    ax.tick_params(colors=COR_TEXT_MUTED, labelsize=9)
+    ax.spines['bottom'].set_color(COR_TEXT_MUTED)
+    ax.spines['left'].set_color(COR_TEXT_MUTED)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#334155')
-
-    ax.tick_params(axis='x', colors='#94a3b8', labelsize=9)
-    ax.tick_params(axis='y', colors='#94a3b8', labelsize=9)
-    ax.yaxis.grid(True, linestyle='--', alpha=0.15, color='#e2e8f0')
-
-    ax.plot(dias, valores, color='#06b6d4', marker='o', linewidth=2, markersize=4, label='Faturamento Diário')
-    ax.fill_between(dias, valores, color='#06b6d4', alpha=0.12)
-
-    ax.set_title("Movimentação Diária de Caixa (R$)", color='#f8fafc', fontsize=12, pad=12, fontweight='bold')
-    ax.set_xlabel("Dia do Mês", color='#94a3b8', fontsize=9, labelpad=8)
-    ax.set_xticks([d for d in dias if d % 2 != 0 or d == 1 or d == num_dias])
     
+    # Grade de fundo sutil
+    ax.grid(True, linestyle=":", alpha=0.2, color=COR_TEXT_MUTED)
+    
+    # Exibe o gráfico de forma responsiva dentro do Streamlit
     st.pyplot(fig)
