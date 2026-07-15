@@ -92,7 +92,7 @@ def init_db():
         KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT
     )""")
 
-    # Criação da tabela de Vendas/OS incluindo as colunas de controle extra
+    # Criação da tabela de Vendas/OS incluindo as novas colunas
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Vendas(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, 
