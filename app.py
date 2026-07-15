@@ -478,13 +478,17 @@ elif menu == "👥 Gestão de Clientes":
                     with col_os2:
                         os_pago = st.number_input("Valor Pago de Adiantamento (R$)", min_value=0.0, step=0.01)
                     
-                    col_p_obs = st.columns([1, 1])
-                    with col_p_obs:
+                    col_p_obs1, col_p_obs2 = st.columns([1, 1])
+                    with col_p_obs1:
                         os_forma_pagamento = st.selectbox(
                             "Forma de Pagamento", 
                             options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
                         )
                     
+                    with col_p_obs2:
+                        # Espaço reservado para manter o alinhamento visual
+                        st.write("")
+
                     os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente", placeholder="Escreva observações aqui...")
 
                     st.write("")
