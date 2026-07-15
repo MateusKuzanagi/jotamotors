@@ -59,10 +59,10 @@ st.markdown("""
     }
     
     /* Botões vermelhos (como Excluir) */
-    div.stButton > button[key*="excluir"], div.stButton > button[key*="deletar"] {
+    div.stButton > button[key*="excluir"], div.stButton > button[key*="deletar"], div.stButton > button[key*="del_"] {
         background-color: #ef4444 !important;
     }
-    div.stButton > button[key*="excluir"]:hover, div.stButton > button[key*="deletar"]:hover {
+    div.stButton > button[key*="excluir"]:hover, div.stButton > button[key*="deletar"]:hover, div.stButton > button[key*="del_"]:hover {
         background-color: #dc2626 !important;
     }
 
@@ -124,13 +124,6 @@ def init_db():
         pass
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS Products(
-        ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
-        Preco REAL, QtdEstoque INTEGER DEFAULT NULL
-    )""")
-
-    # Renomeando tabela se houver conflitos de nomes anteriores
-    cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produtos(
         ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
@@ -158,7 +151,7 @@ if 'user' not in st.session_state:
     st.session_state['user'] = ""
 
 def verificar_login(u, p):
-    conexao = sqlite3.connect(BANCO_DADOS)
+    conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
     senha_criptografada = codificar_senha(p)
     usuario = conexao.execute("SELECT * FROM Usuarios WHERE Nome=? AND Senha=?", (u.strip(), senha_criptografada)).fetchone()
     conexao.close()
@@ -223,7 +216,7 @@ st.divider()
 # ==========================================
 if menu == "📊 Dashboard & Estoque":
     
-    conexao = sqlite3.connect(BANCO_DADOS)
+    conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
     cursor = conexao.cursor()
     cursor.execute("SELECT * FROM Produtos")
     dados_produtos = cursor.fetchall()
@@ -347,7 +340,7 @@ if menu == "📊 Dashboard & Estoque":
                         st.warning("Código e Nome são obrigatórios!")
                     else:
                         try:
-                            conexao = sqlite3.connect(BANCO_DADOS)
+                            conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                             cursor = conexao.cursor()
                             cursor.execute("INSERT INTO Produtos (ID, NomeProduto, Descricao, Preco, QtdEstoque) VALUES (?, ?, ?, ?, ?)",
                                            (new_cod.strip(), new_nome.strip(), new_desc.strip(), new_preco, new_qtd))
@@ -383,7 +376,7 @@ if menu == "📊 Dashboard & Estoque":
                         if not edit_nome.strip():
                             st.warning("O nome não pode ser vazio!")
                         else:
-                            conexao = sqlite3.connect(BANCO_DADOS)
+                            conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                             cursor = conexao.cursor()
                             cursor.execute("UPDATE Produtos SET NomeProduto=?, Descricao=?, Preco=?, QtdEstoque=? WHERE ID=?",
                                            (edit_nome.strip(), edit_desc.strip(), edit_preco, edit_qtd, selected_prod_id))
@@ -393,7 +386,7 @@ if menu == "📊 Dashboard & Estoque":
                             st.rerun()
                             
                     if btn_excluir:
-                        conexao = sqlite3.connect(BANCO_DADOS)
+                        conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                         cursor = conexao.cursor()
                         cursor.execute("DELETE FROM Produtos WHERE ID=?", (selected_prod_id,))
                         conexao.commit()
@@ -407,7 +400,7 @@ if menu == "📊 Dashboard & Estoque":
 elif menu == "👥 Gestão de Clientes":
     st.subheader("👥 Fichas de Clientes e Ordens de Serviços")
     
-    conexao = sqlite3.connect(BANCO_DADOS)
+    conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
     cursor = conexao.cursor()
     cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, PlacaMoto, DataEntrada, DataSaida FROM Clientes")
     dados_clientes = cursor.fetchall()
@@ -462,7 +455,7 @@ elif menu == "👥 Gestão de Clientes":
                     if not c_nome.strip():
                         st.warning("Nome do cliente é obrigatório!")
                     else:
-                        conexao = sqlite3.connect(BANCO_DADOS)
+                        conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                         cursor = conexao.cursor()
                         cursor.execute("""
                             INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto)
@@ -510,7 +503,7 @@ elif menu == "👥 Gestão de Clientes":
                     gravar_os = st.form_submit_button("LANÇAR ORDEM DE SERVIÇO", use_container_width=True)
                     if gravar_os:
                         data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
-                        conexao = sqlite3.connect(BANCO_DADOS)
+                        conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                         cursor = conexao.cursor()
                         
                         p_id = None
@@ -553,7 +546,7 @@ elif menu == "👥 Gestão de Clientes":
             
             if sel_cli_ed:
                 target_cli_id = cli_dict_ed[sel_cli_ed]
-                conexao = sqlite3.connect(BANCO_DADOS)
+                conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                 c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
                 conexao.close()
                 
@@ -588,7 +581,7 @@ elif menu == "👥 Gestão de Clientes":
                         if not ec_nome.strip():
                             st.warning("O Nome é obrigatório!")
                         else:
-                            conexao = sqlite3.connect(BANCO_DADOS)
+                            conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                             cursor = conexao.cursor()
                             cursor.execute("""
                                 UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?, PlacaMoto=?
@@ -600,7 +593,7 @@ elif menu == "👥 Gestão de Clientes":
                             st.rerun()
                             
                     if submit_del_cli:
-                        conexao = sqlite3.connect(BANCO_DADOS)
+                        conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                         cursor = conexao.cursor()
                         # Devolver o estoque de todas as OSs vinculadas antes de excluir o cliente
                         vendas_vinculadas = cursor.execute("SELECT ID, ProdutoID, QtdVendida FROM Vendas WHERE ClienteID=?", (target_cli_id,)).fetchall()
@@ -624,7 +617,7 @@ elif menu == "👥 Gestão de Clientes":
     
     if sel_cli_hist:
         cli_id_h = cli_dict_h[sel_cli_hist]
-        conexao = sqlite3.connect(BANCO_DADOS)
+        conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
         cursor = conexao.cursor()
         cursor.execute("SELECT ID, DataCompra, Servico, ValorTotal, ValorPago FROM Vendas WHERE ClienteID=? ORDER BY ID DESC", (cli_id_h,))
         historico = cursor.fetchall()
@@ -642,7 +635,7 @@ elif menu == "👥 Gestão de Clientes":
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
                 # =========================================================
-                # NOVO: SEÇÃO DE EDIÇÃO DIRETA DE VALORES (SINALIZADA)
+                # NOVO: SEÇÃO DE EDIÇÃO DIRETA DE VALORES (SINALIZADA E SEGURA COM CHAVES ÚNICAS)
                 # =========================================================
                 st.write("")
                 st.markdown("### ✏️ Editar Valores / Registrar Pagamentos")
@@ -662,6 +655,7 @@ elif menu == "👥 Gestão de Clientes":
                     else:
                         status_label = "🟢 Pago / Quitado"
                         
+                    # Criando containers sanfonas únicos para cada OS
                     with st.expander(f"⚙️ OS #{os_id} - {os_desc[:40]}... | {status_label}"):
                         with st.form(f"form_edit_os_direct_{os_id}"):
                             eo_servico = st.text_input("Serviços Realizados / Peças", value=os_desc, key=f"desc_{os_id}")
@@ -672,14 +666,15 @@ elif menu == "👥 Gestão de Clientes":
                             with col_eo2:
                                 eo_pago = st.number_input("Valor Pago pelo Cliente (R$)", min_value=0.0, step=0.01, value=os_pago, key=f"pag_{os_id}")
                             
+                            # Botões de ação com chaves de identificação únicas
                             col_ebtn1, col_ebtn2 = st.columns(2)
                             with col_ebtn1:
-                                btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES", use_container_width=True)
+                                btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES", use_container_width=True, key=f"btn_save_{os_id}")
                             with col_ebtn2:
-                                btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
+                                btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True, key=f"btn_del_{os_id}")
                                 
                             if btn_salvar_os:
-                                conexao = sqlite3.connect(BANCO_DADOS)
+                                conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                                 cursor = conexao.cursor()
                                 cursor.execute("UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?", 
                                                (eo_servico.strip(), eo_total, eo_pago, os_id))
@@ -689,7 +684,7 @@ elif menu == "👥 Gestão de Clientes":
                                 st.rerun()
                                 
                             if btn_deletar_os:
-                                conexao = sqlite3.connect(BANCO_DADOS)
+                                conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
                                 cursor = conexao.cursor()
                                 # Estorna as peças de volta ao estoque
                                 v_estorno = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id,)).fetchone()
@@ -764,7 +759,7 @@ elif menu == "📈 Desempenho do Mês":
     hoje = datetime.now()
     mes_atual_str = hoje.strftime("/%m/%Y")
 
-    conexao = sqlite3.connect(BANCO_DADOS)
+    conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
     cursor = conexao.cursor()
     cursor.execute("SELECT ValorPago, DataCompra FROM Vendas WHERE DataCompra LIKE ?", (f"%{mes_atual_str}%",))
     vendas = cursor.fetchall()
