@@ -3,185 +3,302 @@ import pandas as pd
 from datetime import datetime
 import io
 
-# Configuração da página do Streamlit
+# Configurações da página
 st.set_page_config(
-    page_title="Gerenciador de Ordens de Serviço",
-    page_icon="🏍️",
+    page_title="Sistema de Vendas & OS - Fechamento de Notinha",
+    page_icon="📋",
     layout="wide"
 )
 
-# Estilização CSS personalizada para simular o tema escuro/elegante da imagem
+# Estilização profissional para um visual moderno (inspirado no tema escuro/elegante)
 st.markdown("""
     <style>
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+    .main {
+        background-color: #0e1117;
+    }
+    .card {
+        background-color: #1e222b;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #2d3139;
+        margin-bottom: 20px;
     }
     .card-header {
         background-color: #1e222b;
         padding: 15px;
         border-radius: 8px 8px 0px 0px;
         border-bottom: 2px solid #2d3139;
-        margin-bottom: 0px;
+        margin-bottom: 15px;
     }
-    .info-text {
-        font-size: 14px;
-        color: #e0e0e0;
-        margin-bottom: 5px;
+    .info-title {
+        font-size: 16px;
+        font-weight: bold;
+        color: #4ade80;
     }
-    .badge-placa {
+    .total-highlight {
+        font-size: 24px;
+        font-weight: bold;
+        color: #ef4444;
+    }
+    .badge-status {
         background-color: #103f29;
         color: #4ade80;
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: 4px;
-        font-family: monospace;
+        font-size: 12px;
         font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏍️ Sistema de Controle de Oficina")
+# ---------------------------------------------------------
+# BANCO DE DADOS EM MEMÓRIA (Session State)
+# ---------------------------------------------------------
+if 'clientes' not in st.session_state:
+    st.session_state.clientes = [
+        {"id": 1, "nome": "Carlos Silva", "moto": "XRE 300 (2012)", "placa": "OLT-9423"},
+        {"id": 2, "nome": "Ana Souza", "moto": "CG 160 Fan (2020)", "placa": "ABC-1234"},
+        {"id": 3, "nome": "Roberto Oliveira", "moto": "CB 500X (2022)", "placa": "XYZ-9876"}
+    ]
 
-# 1. ESTADO DA APLICAÇÃO (Banco de dados temporário em memória)
-if 'moto_info' not in st.session_state:
-    st.session_state.moto_info = {
-        "modelo": "XRE 300",
-        "ano": 2012,
-        "placa": "OLT-9423",
-        "km_entrada": 12500,
-        "km_saida": 12505,
-        "data_entrada": datetime(2026, 7, 15).date(),
-        "data_saida": datetime(2026, 7, 15).date()
-    }
-
-if 'dados_os' not in st.session_state:
-    # Dados iniciais da tabela baseados na sua imagem
-    st.session_state.dados_os = pd.DataFrame([
+if 'lancamentos' not in st.session_state:
+    # Dados iniciais para exemplo com as novas colunas
+    st.session_state.lancamentos = pd.DataFrame([
         {
+            "Cliente ID": 1,
             "OS #": 5,
-            "Data da OS": "15/07/2026 18:32",
+            "Data/Hora Entrada": "15/07/2026 10:00",
+            "Data/Hora Saída": "15/07/2026 18:32",
             "Serviços & Peças de Reposição": "Troca de óleo",
             "Total Orçado (R$)": 120.00,
-            "Total Pago (R$)": 100.00
+            "Total Pago (R$)": 0.00,
+            "Forma de Pagamento": "Dinheiro"
+        },
+        {
+            "Cliente ID": 1,
+            "OS #": 6,
+            "Data/Hora Entrada": "15/07/2026 10:00",
+            "Data/Hora Saída": "15/07/2026 19:10",
+            "Serviços & Peças de Reposição": "Pastilha de freio traseira",
+            "Total Orçado (R$)": 85.00,
+            "Total Pago (R$)": 0.00,
+            "Forma de Pagamento": "Pix"
+        },
+        {
+            "Cliente ID": 2,
+            "OS #": 7,
+            "Data/Hora Entrada": "15/07/2026 09:00",
+            "Data/Hora Saída": "15/07/2026 14:00",
+            "Serviços & Peças de Reposição": "Kit relação completo",
+            "Total Orçado (R$)": 320.00,
+            "Total Pago (R$)": 320.00,
+            "Forma de Pagamento": "Cartão crédito"
         }
     ])
 
-# 2. CABEÇALHO INFORMATIVO (EDITÁVEL)
-st.markdown("### 📝 Informações Gerais da Ordem de Serviço")
-col1, col2, col3, col4 = st.columns(4)
+# ---------------------------------------------------------
+# INTERFACE PRINCIPAL
+# ---------------------------------------------------------
+st.title("📋 Fechamento de Notinha & Ordens de Serviço (OS)")
 
-with col1:
-    st.session_state.moto_info["modelo"] = st.text_input("Moto Registrada", st.session_state.moto_info["modelo"])
-with col2:
-    st.session_state.moto_info["ano"] = st.number_input("Ano", value=st.session_state.moto_info["ano"], step=1)
-with col3:
-    st.session_state.moto_info["placa"] = st.text_input("Placa", st.session_state.moto_info["placa"])
-with col4:
-    km_in = st.text_input("KM Entrada", value=str(st.session_state.moto_info["km_entrada"]))
-    km_out = st.text_input("KM Saída", value=str(st.session_state.moto_info["km_saida"]))
+# Colunas de seleção de cliente e nova venda/OS
+col_esquerda, col_direita = st.columns([1, 1])
 
-# Exibição estilizada do cabeçalho atualizado
-st.markdown(f"""
-<div class="card-header">
-    <div class="info-text">
-        <strong>🏍️ Moto Registrada:</strong> {st.session_state.moto_info['modelo']} (Ano: {st.session_state.moto_info['ano']}) | 
-        <strong>Placa:</strong> <span class="badge-placa">{st.session_state.moto_info['placa']}</span>
-    </div>
-    <div class="info-text" style="margin-top: 8px;">
-        📍 <strong>KM Entrada / Saída:</strong> {km_in} / {km_out} | 
-        📅 <strong>Entrada/Saída Oficina:</strong> {st.session_state.moto_info['data_entrada'].strftime('%d/%m/%Y')} a {st.session_state.moto_info['data_saida'].strftime('%d/%m/%Y')}
-    </div>
-</div>
-""", unsafe_allow_html=True)
+with col_esquerda:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("👤 Passo 1: Selecionar Cliente")
+    
+    # Criar lista para selectbox
+    lista_clientes = {c['id']: f"{c['nome']} — {c['moto']} ({c['placa']})" for c in st.session_state.clientes}
+    cliente_selecionado_id = st.selectbox(
+        "Selecione o Cliente para carregar a Notinha:",
+        options=list(lista_clientes.keys()),
+        format_func=lambda x: lista_clientes[x]
+    )
+    
+    # Detalhes do cliente ativo
+    cliente_ativo = next(c for c in st.session_state.clientes if c['id'] == cliente_selecionado_id)
+    
+    st.markdown(f"""
+        <div style='background-color: #242933; padding: 12px; border-radius: 6px; margin-top: 10px;'>
+            <strong>Moto Ativa:</strong> {cliente_ativo['moto']}<br>
+            <strong>Placa:</strong> <span class='badge-status'>{cliente_ativo['placa']}</span>
+        </div>
+    """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# 3. TABELA INTERATIVA E EDITÁVEL (Total Orçado, Pago e cálculo de Valor em Aberto)
-st.markdown("### 🛠️ Detalhes dos Serviços e Valores")
-st.caption("Dica: Dê um duplo clique em qualquer célula da tabela abaixo para editar os valores diretamente!")
+with col_direita:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("➕ Passo 2: Registrar Novo Lançamento (Venda/OS)")
+    
+    with st.form("nova_os_form", clear_on_submit=True):
+        servico = st.text_input("Descrição do Serviço / Peça", placeholder="Ex: Kit de Embreagem, Troca de Vela")
+        
+        # Novas colunas de Data/Hora de Entrada e Saída no formulário
+        col_data1, col_data2 = st.columns(2)
+        with col_data1:
+            data_entrada_input = st.date_input("Data de Entrada", value=datetime.now().date())
+            hora_entrada_input = st.time_input("Hora de Entrada", value=datetime.now().time())
+        with col_data2:
+            data_saida_input = st.date_input("Data de Saída", value=datetime.now().date())
+            hora_saida_input = st.time_input("Hora de Saída", value=datetime.now().time())
+            
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            valor_orcado = st.number_input("Valor Cobrado (R$)", min_value=0.0, step=10.0, value=0.0)
+        with col_f2:
+            valor_pago = st.number_input("Valor Pago Imediato (R$)", min_value=0.0, step=10.0, value=0.0)
+            
+        # Nova coluna de Forma de Pagamento
+        forma_pagamento = st.selectbox(
+            "Forma de Pagamento",
+            options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
+        )
+            
+        salvar_os = st.form_submit_button("Adicionar à Conta do Cliente")
+        
+        if salvar_os:
+            if servico.strip() == "":
+                st.error("Por favor, informe a descrição do serviço ou peça.")
+            else:
+                # Combinar data e hora em string formatada
+                entrada_str = f"{data_entrada_input.strftime('%d/%m/%Y')} {hora_entrada_input.strftime('%H:%M')}"
+                saida_str = f"{data_saida_input.strftime('%d/%m/%Y')} {hora_saida_input.strftime('%H:%M')}"
+                
+                # Gerar ID para a nova OS
+                novo_id_os = int(st.session_state.lancamentos["OS #"].max() + 1) if len(st.session_state.lancamentos) > 0 else 1
+                nova_linha = pd.DataFrame([{
+                    "Cliente ID": cliente_selecionado_id,
+                    "OS #": novo_id_os,
+                    "Data/Hora Entrada": entrada_str,
+                    "Data/Hora Saída": saida_str,
+                    "Serviços & Peças de Reposição": servico,
+                    "Total Orçado (R$)": valor_orcado,
+                    "Total Pago (R$)": valor_pago,
+                    "Forma de Pagamento": forma_pagamento
+                }])
+                st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, nova_linha], ignore_index=True)
+                st.success(f"Lançamento OS #{novo_id_os} registrado com sucesso!")
+                st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# Criamos uma cópia dos dados para edição
-df_para_editar = st.session_state.dados_os.copy()
+# ---------------------------------------------------------
+# ÁREA DE EDIÇÃO DOS LANÇAMENTOS (INCLUINDO NOVAS FUNÇÕES)
+# ---------------------------------------------------------
+st.markdown("---")
+st.subheader(f"🛠️ Lançamentos Ativos de: {cliente_ativo['nome']}")
+st.info("💡 Você pode editar qualquer célula diretamente na tabela abaixo (incluindo as Datas, Horários, Forma de Pagamento, Valores, etc.)!")
 
-# Garantimos os tipos numéricos para os cálculos
-df_para_editar["Total Orçado (R$)"] = pd.to_numeric(df_para_editar["Total Orçado (R$)"])
-df_para_editar["Total Pago (R$)"] = pd.to_numeric(df_para_editar["Total Pago (R$)"])
+# Filtrar lançamentos apenas do cliente selecionado
+df_cliente = st.session_state.lancamentos[st.session_state.lancamentos["Cliente ID"] == cliente_selecionado_id].copy()
 
-# st.data_editor permite editar os dados diretamente na tela de forma elegante
+# Garantir que os campos numéricos estão corretos
+df_cliente["Total Orçado (R$)"] = pd.to_numeric(df_cliente["Total Orçado (R$)"])
+df_cliente["Total Pago (R$)"] = pd.to_numeric(df_cliente["Total Pago (R$)"])
+
+# Tabela Editável utilizando st.data_editor
 df_editado = st.data_editor(
-    df_para_editar,
-    num_rows="dynamic", # Permite que você adicione novas linhas clicando no "+"
+    df_cliente,
+    num_rows="dynamic",  # Permite adicionar (+) ou excluir lançamentos
     column_config={
+        "Cliente ID": None,  # Oculta o ID do cliente da visualização do usuário
         "OS #": st.column_config.NumberColumn("OS #", disabled=True, format="%d"),
-        "Data da OS": st.column_config.TextColumn("Data da OS"),
-        "Serviços & Peças de Reposição": st.column_config.TextColumn("Serviços & Peças de Reposição", width="medium"),
+        "Data/Hora Entrada": st.column_config.TextColumn("Data/Hora Entrada"),
+        "Data/Hora Saída": st.column_config.TextColumn("Data/Hora Saída"),
+        "Serviços & Peças de Reposição": st.column_config.TextColumn("Descrição do Serviço / Peça", width="large"),
         "Total Orçado (R$)": st.column_config.NumberColumn("Total Orçado (R$)", min_value=0.0, format="R$ %.2f"),
-        "Total Pago (R$)": st.column_config.NumberColumn("Total Pago (R$)", min_value=0.0, format="R$ %.2f")
+        "Total Pago (R$)": st.column_config.NumberColumn("Valor Pago (R$)", min_value=0.0, format="R$ %.2f"),
+        "Forma de Pagamento": st.column_config.SelectboxColumn(
+            "Forma de Pagamento",
+            options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"],
+            required=True
+        )
     },
     use_container_width=True,
-    key="os_editor"
+    key="editor_lancamentos"
 )
 
-# Atualiza o estado da aplicação com os dados novos editados pelo usuário
-st.session_state.dados_os = df_editado
+# ---------------------------------------------------------
+# ATUALIZAR O BANCO DE DADOS GLOBAL COM AS EDIÇÕES
+# ---------------------------------------------------------
+if not df_editado.equals(df_cliente):
+    # Removemos os registros antigos deste cliente
+    df_outros = st.session_state.lancamentos[st.session_state.lancamentos["Cliente ID"] != cliente_selecionado_id]
+    
+    # Garantimos que os registros novos mantêm o ID do cliente correto
+    df_editado["Cliente ID"] = cliente_selecionado_id
+    
+    # Juntamos de volta no estado global
+    st.session_state.lancamentos = pd.concat([df_outros, df_editado], ignore_index=True)
+    st.rerun()
 
-# 4. CÁLCULO DE VALORES EM ABERTO E RESUMO FINACEIRO
-# Calculamos os totais gerais
-total_orcado_geral = df_editado["Total Orçado (R$)"].sum()
-total_pago_geral = df_editado["Total Pago (R$)"].sum()
-total_em_aberto = total_orcado_geral - total_pago_geral
+# ---------------------------------------------------------
+# FECHAMENTO DA CONTA (CÁLCULO E NOTINHA)
+# ---------------------------------------------------------
+st.markdown("---")
+st.subheader("💰 Fechamento e Resumo de Valores")
 
-# Exibe os cartões com os resultados
-st.markdown("### 📊 Resumo Financeiro")
-col_res1, col_res2, col_res3 = st.columns(3)
+# Cálculos com base nos valores editados
+total_orcado = df_editado["Total Orçado (R$)"].sum() if len(df_editado) > 0 else 0.0
+total_pago = df_editado["Total Pago (R$)"].sum() if len(df_editado) > 0 else 0.0
+valor_em_aberto = total_orcado - total_pago
 
-with col_res1:
-    st.metric(label="Total Orçado", value=f"R$ {total_orcado_geral:,.2f}")
-with col_res2:
-    st.metric(label="Total Pago", value=f"R$ {total_pago_geral:,.2f}", delta=f"Pago", delta_color="normal")
-with col_res3:
-    # Mostra em vermelho se houver valor em aberto
-    cor_alerta = "inverse" if total_em_aberto > 0 else "normal"
+col_card1, col_card2, col_card3 = st.columns(3)
+
+with col_card1:
+    st.metric(label="Total de Serviços & Peças", value=f"R$ {total_orcado:,.2f}")
+with col_card2:
+    st.metric(label="Total Pago pelo Cliente", value=f"R$ {total_pago:,.2f}", delta="Já recebido", delta_color="normal")
+with col_card3:
+    status_cor = "inverse" if valor_em_aberto > 0 else "normal"
     st.metric(
-        label="Valor em Aberto (Restante)", 
-        value=f"R$ {total_em_aberto:,.2f}", 
-        delta=f"- R$ {total_em_aberto:,.2f}" if total_em_aberto > 0 else "Tudo Pago!",
-        delta_color=cor_alerta
+        label="Valor Pendente / Em Aberto",
+        value=f"R$ {valor_em_aberto:,.2f}",
+        delta=f"Falta Receber R$ {valor_em_aberto:,.2f}" if valor_em_aberto > 0 else "Tudo Pago! ✅",
+        delta_color=status_cor
     )
 
-# 5. GERADOR DE EXTRATO EM PDF (Botão de Exportação)
-def gerar_pdf_mock(moto_info, df_dados, total_o, total_p, total_a):
-    # Função simples para gerar um relatório em texto amigável ou CSV para download
-    # Para simplificar e rodar direto no GitHub Pages/Streamlit sem dependências complexas de OS
-    output = io.StringIO()
-    output.write(f"EXTRATO DE ORDEM DE SERVIÇO\n")
-    output.write(f"="*40 + "\n")
-    output.write(f"Moto: {moto_info['modelo']} ({moto_info['ano']}) - Placa: {moto_info['placa']}\n")
-    output.write(f"KM Entrada/Saída: {km_in} / {km_out}\n")
-    output.write(f"Data de Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-    output.write(f"="*40 + "\n\n")
-    
-    output.write("SERVIÇOS:\n")
-    for index, row in df_dados.iterrows():
-        output.write(f"- OS #{row['OS #']} | {row['Serviços & Peças de Reposição']} | Orçado: R$ {row['Total Orçado (R$)']:.2f} | Pago: R$ {row['Total Pago (R$)']:.2f}\n")
+# Ações de Fechamento
+col_btn1, col_btn2 = st.columns(2)
+
+with col_btn1:
+    # Gerar extrato atualizado com novas informações para impressão
+    def gerar_extrato_txt(cliente, df_dados, total_o, total_p, total_a):
+        output = io.StringIO()
+        output.write(f"========= NOTINHA / EXTRATO DE OS =========\n")
+        output.write(f"Cliente: {cliente['nome']}\n")
+        output.write(f"Moto: {cliente['moto']} | Placa: {cliente['placa']}\n")
+        output.write(f"Data de Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+        output.write(f"============================================\n\n")
+        output.write(f"Detalhamento de Lançamentos:\n")
         
-    output.write(f"\n" + "="*40 + "\n")
-    output.write(f"TOTAL ORÇADO: R$ {total_o:.2f}\n")
-    output.write(f"TOTAL PAGO: R$ {total_p:.2f}\n")
-    output.write(f"VALOR EM ABERTO: R$ {total_a:.2f}\n")
-    output.write(f"="*40 + "\n")
-    return output.getvalue()
+        for index, row in df_dados.iterrows():
+            output.write(f"OS #{int(row['OS #'])} | Entrada: {row['Data/Hora Entrada']} | Saída: {row['Data/Hora Saída']}\n")
+            output.write(f" - {row['Serviços & Peças de Reposição']}\n")
+            output.write(f" - Pagamento: {row['Forma de Pagamento']}\n")
+            output.write(f" - Orçado: R$ {row['Total Orçado (R$)']:.2f} | Pago: R$ {row['Total Pago (R$)']:.2f}\n\n")
+            
+        output.write(f"============================================\n")
+        output.write(f"TOTAL GERAL COBRADO: R$ {total_o:.2f}\n")
+        output.write(f"TOTAL JÁ PAGO:       R$ {total_p:.2f}\n")
+        output.write(f"VALOR EM ABERTO:     R$ {total_a:.2f}\n")
+        output.write(f"============================================\n")
+        output.write(f"Agradecemos a preferência! Volte sempre.\n")
+        return output.getvalue()
 
-extrato_txt = gerar_pdf_mock(
-    st.session_state.moto_info, 
-    df_editado, 
-    total_orcado_geral, 
-    total_pago_geral, 
-    total_em_aberto
-)
+    extrato_conteudo = gerar_extrato_txt(cliente_ativo, df_editado, total_orcado, total_pago, valor_em_aberto)
+    
+    st.download_button(
+        label="🖨️ Exportar Extrato Completo",
+        data=extrato_conteudo,
+        file_name=f"notinha_{cliente_ativo['nome'].lower().replace(' ', '_')}.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
 
-# Botão de exportação semelhante ao da sua imagem
-st.download_button(
-    label="🖨️ Exportar Extrato Completo (TXT/Relatório)",
-    data=extrato_txt,
-    file_name=f"extrato_{st.session_state.moto_info['placa']}.txt",
-    mime="text/plain"
-)
+with col_btn2:
+    if st.button("✅ Quitar Tudo e Fechar Conta", use_container_width=True, type="primary"):
+        st.session_state.lancamentos.loc[st.session_state.lancamentos["Cliente ID"] == cliente_selecionado_id, "Total Pago (R$)"] = \
+            st.session_state.lancamentos.loc[st.session_state.lancamentos["Cliente ID"] == cliente_selecionado_id, "Total Orçado (R$)"]
+        st.success(f"Conta de {cliente_ativo['nome']} quitada com sucesso!")
+        st.rerun()
