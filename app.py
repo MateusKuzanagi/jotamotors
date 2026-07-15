@@ -486,7 +486,6 @@ elif menu == "👥 Gestão de Clientes":
                         )
                     
                     with col_p_obs2:
-                        # Espaço reservado para manter o alinhamento visual
                         st.write("")
 
                     os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente", placeholder="Escreva observações aqui...")
@@ -608,6 +607,72 @@ elif menu == "👥 Gestão de Clientes":
                     "Total Orçado (R$)", "Total Pago (R$)", "Entrada Oficial", "Saída Oficial", "Forma Pagamento", "Anotações / Obs"
                 ])
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                
+                # --- NOVA SESSÃO: EDITAR OU EXCLUIR OS ---
+                st.markdown("### ✏️ Editar ou Excluir Lançamento (OS)")
+                os_dict = {f"OS #{d[0]} - {d[2]}": d[0] for d in historico}
+                sel_os_ed = st.selectbox("Selecione a Ordem de Serviço que deseja alterar ou excluir:", [""] + list(os_dict.keys()))
+                
+                if sel_os_ed:
+                    os_id_target = os_dict[sel_os_ed]
+                    cur_os = [d for d in historico if d[0] == os_id_target][0]
+                    
+                    with st.form("form_edit_os"):
+                        st.info(f"Alterando OS #{os_id_target}")
+                        edit_servico = st.text_input("Serviços & Peças de Reposição", value=cur_os[2])
+                        
+                        col_v1, col_v2 = st.columns(2)
+                        with col_v1:
+                            edit_vtotal = st.number_input("Total Orçado (R$)", value=float(cur_os[3] or 0.0), step=0.01)
+                        with col_v2:
+                            edit_vpago = st.number_input("Total Pago (R$)", value=float(cur_os[4] or 0.0), step=0.01)
+
+                        col_dt1, col_dt2 = st.columns(2)
+                        with col_dt1:
+                            edit_ent = st.text_input("Entrada Oficial", value=cur_os[5] or "")
+                        with col_dt2:
+                            edit_sai = st.text_input("Saída Oficial", value=cur_os[6] or "")
+
+                        col_f1, col_f2 = st.columns(2)
+                        with col_f1:
+                            opcoes_pgto = ["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
+                            idx_pgto = opcoes_pgto.index(cur_os[7]) if cur_os[7] in opcoes_pgto else 0
+                            edit_forma = st.selectbox("Forma de Pagamento", opcoes_pgto, index=idx_pgto)
+                        with col_f2:
+                            edit_obs = st.text_area("Anotações / Obs", value=cur_os[8] or "", height=68)
+
+                        st.write("")
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            btn_salvar_os = st.form_submit_button("💾 SALVAR VALORES E DADOS", use_container_width=True)
+                        with col_btn2:
+                            btn_del_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
+
+                        if btn_salvar_os:
+                            if not edit_servico.strip():
+                                st.warning("A descrição do serviço não pode ficar vazia!")
+                            else:
+                                conexao = sqlite3.connect(BANCO_DADOS)
+                                cursor = conexao.cursor()
+                                cursor.execute("""
+                                    UPDATE Vendas
+                                    SET Servico=?, ValorTotal=?, ValorPago=?, DataHoraEntrada=?, DataHoraSaida=?, FormaPagamento=?, Observacoes=?
+                                    WHERE ID=?
+                                """, (edit_servico.strip(), edit_vtotal, edit_vpago, edit_ent.strip(), edit_sai.strip(), edit_forma, edit_obs.strip(), os_id_target))
+                                conexao.commit()
+                                conexao.close()
+                                st.success("Ordem de Serviço atualizada com sucesso!")
+                                st.rerun()
+
+                        if btn_del_os:
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id_target,))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ordem de Serviço excluída permanentemente!")
+                            st.rerun()
+                # ----------------------------------------
                 
                 # Gerar PDF do Extrato com as Novas Funções Integradas
                 def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
