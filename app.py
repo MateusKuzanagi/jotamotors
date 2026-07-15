@@ -3,6 +3,7 @@ import sqlite3
 import os
 import io
 import calendar
+import hashlib  # Security: Criptografia de senhas
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -58,10 +59,10 @@ st.markdown("""
     }
     
     /* Botões vermelhos (como Excluir) */
-    div.stButton > button[key*="excluir"] {
+    div.stButton > button[key*="excluir"], div.stButton > button[key*="deletar"] {
         background-color: #ef4444 !important;
     }
-    div.stButton > button[key*="excluir"]:hover {
+    div.stButton > button[key*="excluir"]:hover, div.stButton > button[key*="deletar"]:hover {
         background-color: #dc2626 !important;
     }
 
@@ -72,6 +73,13 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# FUNÇÕES DE SEGURANÇA (CRIPTOGRAFIA)
+# ==========================================
+def codificar_senha(senha):
+    """Cria um hash SHA-256 seguro da senha para que ela não fique em texto limpo."""
+    return hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
 # ==========================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -93,17 +101,27 @@ def init_db():
         PlacaMoto TEXT
     )""")
 
-    # Atualização dinâmica para quem já tem o banco antigo no PC
+    # Atualização dinâmica de colunas na tabela Clientes
     try:
         cursor.execute("ALTER TABLE Clientes ADD COLUMN PlacaMoto TEXT")
     except sqlite3.OperationalError:
-        pass  # A coluna já existe, não precisa fazer nada
+        pass 
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Vendas(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, ClienteID INTEGER, Servico TEXT,
-        ValorTotal REAL, ValorPago REAL, DataCompra TEXT
+        ValorTotal REAL, ValorPago REAL, DataCompra TEXT, ProdutoID TEXT, QtdVendida INTEGER DEFAULT 0
     )""")
+
+    # Atualização dinâmica de colunas na tabela Vendas (Baixa de estoque integrada)
+    try:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN ProdutoID TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN QtdVendida INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produtos(
@@ -111,12 +129,13 @@ def init_db():
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
     )""")
 
-    # Usuários Padrão
+    # Usuários Padrão (Salvando com Hash Seguro!)
     usuarios_padrao = [('admin', '123'), ('maironxd', '14125'), ('luana', '14125'), ('josue', '123')]
     for user, senha in usuarios_padrao:
         cursor.execute("SELECT * FROM Usuarios WHERE Nome=?", (user,))
         if not cursor.fetchone():
-            cursor.execute("INSERT INTO Usuarios VALUES (NULL,?,?)", (user, senha))
+            senha_segura = codificar_senha(senha)
+            cursor.execute("INSERT INTO Usuarios VALUES (NULL,?,?)", (user, senha_segura))
 
     conexao.commit()
     conexao.close()
@@ -133,7 +152,8 @@ if 'user' not in st.session_state:
 
 def verificar_login(u, p):
     conexao = sqlite3.connect(BANCO_DADOS)
-    usuario = conexao.execute("SELECT * FROM Usuarios WHERE Nome=? AND Senha=?", (u.strip(), p.strip())).fetchone()
+    senha_criptografada = codificar_senha(p)
+    usuario = conexao.execute("SELECT * FROM Usuarios WHERE Nome=? AND Senha=?", (u.strip(), senha_criptografada)).fetchone()
     conexao.close()
     return usuario
 
@@ -143,7 +163,6 @@ if not st.session_state['logged_in']:
     st.write("")
     st.write("")
     
-    # 3 colunas para empurrar o formulário para o centro exato
     col_lateral_esq, col_login_central, col_lateral_dir = st.columns([1, 1.2, 1])
     
     with col_login_central:
@@ -172,7 +191,6 @@ if not st.session_state['logged_in']:
 # CÓDIGO DO SISTEMA (APÓS LOGIN)
 # ==========================================
 
-# Barra Lateral de Navegação
 st.sidebar.markdown(f"### 👤 Usuário: **{st.session_state['user']}**")
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state['logged_in'] = False
@@ -198,7 +216,6 @@ st.divider()
 # ==========================================
 if menu == "📊 Dashboard & Estoque":
     
-    # Obter dados para os KPI's do Dashboard
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
     cursor.execute("SELECT * FROM Produtos")
@@ -224,7 +241,6 @@ if menu == "📊 Dashboard & Estoque":
             if int(v_qtd) <= 3: 
                 estoque_baixo += 1
 
-    # Grid de Indicadores (Métricas modernas em caixas separadas)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         with st.container(border=True):
@@ -241,13 +257,10 @@ if menu == "📊 Dashboard & Estoque":
 
     st.write("")
     
-    # Seção da Tabela de Estoque
     st.subheader("📦 Consulta de Estoque de Peças")
     
-    # Criar DataFrame para pesquisa dinâmica
     df_prod = pd.DataFrame(dados_produtos, columns=["CÓDIGO/ID", "NOME DO PRODUTO", "DESCRIÇÃO", "PREÇO R$", "QTD ESTOQUE"])
     
-    # Filtro Dinâmico Compacto
     col_filtro, col_b1, col_b2 = st.columns([3, 1, 1])
     with col_filtro:
         busca_prod = st.text_input("🔎 Digite para pesquisar produto (Código ou Nome):", label_visibility="collapsed", placeholder="Buscar por código ou nome do produto...")
@@ -258,10 +271,8 @@ if menu == "📊 Dashboard & Estoque":
             df_prod['NOME DO PRODUTO'].astype(str).str.contains(busca_prod, case=False)
         ]
     
-    # Tabela Visual do Estoque
     st.dataframe(df_prod, use_container_width=True, hide_index=True)
 
-    # Botões de Exportação Alinhados
     with col_b1:
         csv_data = df_prod.to_csv(index=False, sep=';').encode('utf-8-sig')
         st.download_button(
@@ -311,7 +322,6 @@ if menu == "📊 Dashboard & Estoque":
 
     st.divider()
     
-    # Cadastro e Edição Lado a Lado organizados em "Cards"
     col_cad, col_ed = st.columns(2)
 
     with col_cad:
@@ -394,11 +404,14 @@ elif menu == "👥 Gestão de Clientes":
     cursor = conexao.cursor()
     cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, PlacaMoto, DataEntrada, DataSaida FROM Clientes")
     dados_clientes = cursor.fetchall()
+    
+    # Buscar lista de produtos para o menu de baixa de estoque
+    cursor.execute("SELECT ID, NomeProduto, Preco, QtdEstoque FROM Produtos")
+    lista_produtos_os = cursor.fetchall()
     conexao.close()
     
     df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Placa", "Data Entrada", "Data Saída"])
     
-    # Campo de busca para o cliente (Agora pesquisa por Placa também!)
     busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome, Modelo da Moto ou Placa):", placeholder="Ex: Honda CG, João, ABC1D23...")
     if busca_cli:
         df_cli = df_cli[
@@ -411,7 +424,6 @@ elif menu == "👥 Gestão de Clientes":
 
     st.divider()
     
-    # Organização das Fichas e Lançamento de OS
     col_c1, col_c2 = st.columns(2)
     
     with col_c1:
@@ -454,6 +466,9 @@ elif menu == "👥 Gestão de Clientes":
                         st.success("Ficha cadastrada com sucesso!")
                         st.rerun()
 
+        # =========================================================
+        # REGISTRO DE OS COM BAIXA AUTOMÁTICA DE ESTOQUE
+        # =========================================================
         st.markdown("### 🛠️ Registrar Ordem de Serviço (Venda)")
         with st.container(border=True):
             cli_dict = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
@@ -462,7 +477,21 @@ elif menu == "👥 Gestão de Clientes":
             if sel_cli_venda:
                 target_cli_id = cli_dict[sel_cli_venda]
                 with st.form("form_lancar_os", clear_on_submit=True):
-                    os_desc = st.text_input("Serviços Realizados / Peças Trocadas*")
+                    
+                    st.markdown("**Peças & Estoque (Baixa Automática)**")
+                    prod_dict_os = {f"{p[1]} (Cód: {p[0]}) | Est: {p[3]} un | R$ {p[2]:.2f}": p for p in lista_produtos_os}
+                    sel_prod_os = st.selectbox("Vincular Peça do Estoque (Opcional)", ["Nenhum (Apenas Serviço)"] + list(prod_dict_os.keys()))
+                    
+                    qtd_usada = 1
+                    if sel_prod_os != "Nenhum (Apenas Serviço)":
+                        prod_selecionado = prod_dict_os[sel_prod_os]
+                        qtd_max = int(prod_selecionado[3]) if prod_selecionado[3] is not None else 999
+                        qtd_usada = st.number_input("Quantidade Utilizada", min_value=1, max_value=max(1, qtd_max), value=1, step=1)
+                        st.caption(f"Preço Unitário: **R$ {prod_selecionado[2]:.2f}** | Total Peça: **R$ {prod_selecionado[2] * qtd_usada:.2f}**")
+                    
+                    st.divider()
+                    st.markdown("**Informações do Serviço**")
+                    os_desc = st.text_input("Serviços Realizados / Mão de Obra*")
                     
                     col_os1, col_os2 = st.columns(2)
                     with col_os1:
@@ -473,17 +502,40 @@ elif menu == "👥 Gestão de Clientes":
                     st.write("")
                     gravar_os = st.form_submit_button("LANÇAR ORDEM DE SERVIÇO", use_container_width=True)
                     if gravar_os:
-                        if not os_desc.strip():
-                            st.warning("A descrição da OS é obrigatória!")
+                        data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        conexao = sqlite3.connect(BANCO_DADOS)
+                        cursor = conexao.cursor()
+                        
+                        p_id = None
+                        qtd_venda = 0
+                        desc_final = os_desc.strip()
+                        
+                        # Se houver produto vinculado, dar baixa e anexar no texto
+                        if sel_prod_os != "Nenhum (Apenas Serviço)":
+                            prod_selecionado = prod_dict_os[sel_prod_os]
+                            p_id = prod_selecionado[0]
+                            p_nome = prod_selecionado[1]
+                            qtd_venda = qtd_usada
+                            
+                            if not desc_final:
+                                desc_final = f"{p_nome} (x{qtd_venda})"
+                            else:
+                                desc_final = f"{p_nome} (x{qtd_venda}) + {desc_final}"
+                                
+                            # Decrementar o estoque na tabela Produtos
+                            cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque - ? WHERE ID = ?", (qtd_venda, p_id))
+                        
+                        if not desc_final:
+                            st.warning("É necessário informar uma peça ou descrição de serviço!")
                         else:
-                            data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
-                            conexao = sqlite3.connect(BANCO_DADOS)
-                            cursor = conexao.cursor()
-                            cursor.execute("INSERT INTO Vendas (ClienteID, Servico, ValorTotal, ValorPago, DataCompra) VALUES (?, ?, ?, ?, ?)",
-                                           (target_cli_id, os_desc.strip(), os_total, os_pago, data_atual))
+                            cursor.execute("""
+                                INSERT INTO Vendas (ClienteID, Servico, ValorTotal, ValorPago, DataCompra, ProdutoID, QtdVendida) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (target_cli_id, desc_final, os_total, os_pago, data_atual, p_id, qtd_venda))
+                            
                             conexao.commit()
                             conexao.close()
-                            st.success("Ordem de serviço registrada com sucesso!")
+                            st.success("Ordem de serviço registrada com baixa efetuada no estoque!")
                             st.rerun()
 
     with col_c2:
@@ -543,11 +595,17 @@ elif menu == "👥 Gestão de Clientes":
                     if submit_del_cli:
                         conexao = sqlite3.connect(BANCO_DADOS)
                         cursor = conexao.cursor()
+                        # Devolver o estoque de todas as OSs vinculadas antes de excluir o cliente
+                        vendas_vinculadas = cursor.execute("SELECT ID, ProdutoID, QtdVendida FROM Vendas WHERE ClienteID=?", (target_cli_id,)).fetchall()
+                        for v in vendas_vinculadas:
+                            if v[1] and (v[2] or 0) > 0:
+                                cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (v[2], v[1]))
+                        
                         cursor.execute("DELETE FROM Clientes WHERE ID=?", (target_cli_id,))
                         cursor.execute("DELETE FROM Vendas WHERE ClienteID=?", (target_cli_id,))
                         conexao.commit()
                         conexao.close()
-                        st.success("Cliente removido permanentemente!")
+                        st.success("Cliente e histórico removidos permanentemente!")
                         st.rerun()
 
     # Histórico de Serviços / Gerador de Extrato
@@ -564,7 +622,6 @@ elif menu == "👥 Gestão de Clientes":
         cursor.execute("SELECT ID, DataCompra, Servico, ValorTotal, ValorPago FROM Vendas WHERE ClienteID=? ORDER BY ID DESC", (cli_id_h,))
         historico = cursor.fetchall()
         
-        # Meta informações
         cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
         conexao.close()
         
@@ -575,6 +632,73 @@ elif menu == "👥 Gestão de Clientes":
             if historico:
                 df_hist = pd.DataFrame(historico, columns=["OS #", "Data da OS", "Serviços & Peças de Reposição", "Total Orçado (R$)", "Total Pago (R$)"])
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                
+                # =========================================================
+                # NOVO: SEÇÃO EXCLUSIVA PARA EDIÇÃO E BAIXA DA OS EM ABERTO
+                # =========================================================
+                st.write("")
+                st.markdown("#### ✏️ Editar / Atualizar Pagamento da OS")
+                os_ids = [f"OS #{h[0]} - {h[2][:40]}... (Falta pagar: R$ {float(h[3] or 0.0) - float(h[4] or 0.0):.2f})" for h in historico]
+                os_dict = {f"OS #{h[0]} - {h[2][:40]}... (Falta pagar: R$ {float(h[3] or 0.0) - float(h[4] or 0.0):.2f})": h for h in historico}
+                
+                sel_os_ed = st.selectbox("Escolha uma OS listada acima para alterar ou dar baixa financeira:", [""] + os_ids)
+                if sel_os_ed:
+                    os_dados = os_dict[sel_os_ed]
+                    os_id_alvo = os_dados[0]
+                    os_servico_atual = os_dados[2]
+                    os_total_atual = float(os_dados[3] or 0.0)
+                    os_pago_atual = float(os_dados[4] or 0.0)
+                    
+                    with st.form(f"form_edit_os_{os_id_alvo}"):
+                        st.info(f"Modificando Registro da **OS #{os_id_alvo}**")
+                        eo_servico = st.text_input("Serviços Realizados / Peças", value=os_servico_atual)
+                        
+                        col_eo1, col_eo2 = st.columns(2)
+                        with col_eo1:
+                            eo_total = st.number_input("Valor Total (R$)", min_value=0.0, step=0.01, value=os_total_atual)
+                        with col_eo2:
+                            eo_pago = st.number_input("Valor Pago (R$)", min_value=0.0, step=0.01, value=os_pago_atual)
+                        
+                        saldo_devedor = eo_total - eo_pago
+                        if saldo_devedor > 0:
+                            st.error(f"⚠️ Saldo pendente em aberto: **R$ {saldo_devedor:.2f}**")
+                        elif saldo_devedor == 0:
+                            st.success("✅ Esta Ordem de Serviço está completamente paga!")
+                        else:
+                            st.warning(f"Troco / Crédito para o cliente: **R$ {abs(saldo_devedor):.2f}**")
+                            
+                        col_ebtn1, col_ebtn2 = st.columns(2)
+                        with col_ebtn1:
+                            btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES FINANCEIRAS", use_container_width=True)
+                        with col_ebtn2:
+                            btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
+                            
+                        if btn_salvar_os:
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?", 
+                                           (eo_servico.strip(), eo_total, eo_pago, os_id_alvo))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ordem de serviço atualizada com sucesso!")
+                            st.rerun()
+                            
+                        if btn_deletar_os:
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            
+                            # Buscar se havia produto vinculado para estornar o estoque
+                            v_estorno = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id_alvo,)).fetchone()
+                            if v_estorno and v_estorno[0] and (v_estorno[1] or 0) > 0:
+                                cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (v_estorno[1], v_estorno[0]))
+                                
+                            cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id_alvo,))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ordem de Serviço removida e peças estornadas ao estoque!")
+                            st.rerun()
+
+                st.divider()
                 
                 # Gerar PDF do Extrato (Incluindo Placa no Cabeçalho)
                 def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
@@ -663,7 +787,6 @@ elif menu == "📈 Desempenho do Mês":
     with col_fat1:
         st.info(f"**Fechamento Parcial:** O faturamento atual para o mês de **{hoje.strftime('%B/%Y').upper()}** é de **R$ {total_mes:,.2f}**")
     
-    # Gráfico do faturamento diário
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(12, 4))
     fig.patch.set_facecolor('#0f172a')
@@ -685,7 +808,6 @@ elif menu == "📈 Desempenho do Mês":
     ax.set_xlabel("Dia do Mês", color='#94a3b8', fontsize=9, labelpad=8)
     ax.set_xticks([d for d in dias if d % 2 != 0 or d == 1 or d == num_dias])
     
-    # Renderizar gráfico na página web
     st.pyplot(fig)
     
     # PDF de Desempenho com o gráfico integrado
@@ -713,50 +835,35 @@ elif menu == "📈 Desempenho do Mês":
         c.drawString(40, altura - 65, f"Gerado em: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
 
         c.setFillColor(HexColor(COR_CARD))
-        c.roundRect(40, altura - 180, largura - 80, 80, 8, fill=True, stroke=False)
-
-        c.setFillColor(HexColor(COR_ACCENT_GREEN))
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(60, altura - 130, f"Receita Total Acumulada: R$ {tot_mes:.2f}")
+        c.roundRect(40, altura - 180, largura - 80, 80, 8, stroke=False, fill=True)
 
         c.setFillColor(HexColor(COR_TEXT))
-        c.setFont("Helvetica", 11)
-        c.drawString(60, altura - 155, f"Referência: {hoje.strftime('%B / %Y').upper()}")
-        c.drawRightString(largura - 60, altura - 155, f"Dias Corridos: {hoje.day} de {dias_tot}")
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(60, altura - 130, "Faturamento Total Acumulado no Mês")
 
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-            tmp.write(img_buf.getvalue())
-            tmp_path = tmp.name
+        c.setFillColor(HexColor(COR_ACCENT_GREEN))
+        c.setFont("Helvetica-Bold", 20)
+        c.drawString(60, altura - 165, f"R$ {tot_mes:,.2f}")
 
-        grafico_y = altura - 190 - 330
-        c.drawImage(tmp_path, 40, grafico_y, width=largura - 80, height=310)
-
-        c.setStrokeColor(HexColor(COR_CARD))
-        c.setLineWidth(1)
-        c.line(40, 150, largura - 40, 150)
+        from reportlab.lib.utils import ImageReader
+        img_reader = ImageReader(img_buf)
+        c.drawImage(img_reader, 40, 120, width=largura - 80, height=280)
 
         c.setFillColor(HexColor(COR_TEXT_MUTED))
-        c.setFont("Helvetica-Oblique", 9)
-        c.drawString(40, 125, "* Dados computados a partir das vendas registradas no fechamento deste relatório.")
-        c.drawString(40, 110, "Página 1 de 1")
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(largura / 2, 45, "JotaMotors ERP - Software de Gestão e Administração")
 
         c.save()
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
-            
         buffer.seek(0)
         return buffer.getvalue()
 
-    pdf_faturamento = exportar_grafico_pdf_bytes(total_mes, num_dias, dias, valores)
+    pdf_desempenho_dados = exportar_grafico_pdf_bytes(total_mes, num_dias, dias, valores)
     
     with col_fat2:
         st.download_button(
-            label="📕 Exportar Relatório PDF",
-            data=pdf_faturamento,
-            file_name=f"fechamento_mensal_{hoje.strftime('%m_%Y')}.pdf",
+            label="📕 Baixar PDF Desempenho",
+            data=pdf_desempenho_dados,
+            file_name=f"faturamento_{hoje.strftime('%m_%Y')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
