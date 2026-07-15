@@ -89,8 +89,15 @@ def init_db():
     CREATE TABLE IF NOT EXISTS Clientes(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT, Endereco TEXT,
         Telefone TEXT, ModeloMoto TEXT, AnoMoto TEXT, KM TEXT,
-        KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT
+        KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT,
+        PlacaMoto TEXT
     )""")
+
+    # Atualização dinâmica para quem já tem o banco antigo no PC
+    try:
+        cursor.execute("ALTER TABLE Clientes ADD COLUMN PlacaMoto TEXT")
+    except sqlite3.OperationalError:
+        pass  # A coluna já existe, não precisa fazer nada
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Vendas(
@@ -385,18 +392,19 @@ elif menu == "👥 Gestão de Clientes":
     
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
-    cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, DataEntrada, DataSaida FROM Clientes")
+    cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, PlacaMoto, DataEntrada, DataSaida FROM Clientes")
     dados_clientes = cursor.fetchall()
     conexao.close()
     
-    df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Data Entrada", "Data Saída"])
+    df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Placa", "Data Entrada", "Data Saída"])
     
-    # Campo de busca para o cliente
-    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome ou Modelo da Moto):", placeholder="Ex: Honda CG, João...")
+    # Campo de busca para o cliente (Agora pesquisa por Placa também!)
+    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome, Modelo da Moto ou Placa):", placeholder="Ex: Honda CG, João, ABC1D23...")
     if busca_cli:
         df_cli = df_cli[
             df_cli['Nome do Cliente'].astype(str).str.contains(busca_cli, case=False) |
-            df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False)
+            df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False) |
+            df_cli['Placa'].astype(str).str.contains(busca_cli, case=False)
         ]
         
     st.dataframe(df_cli, use_container_width=True, hide_index=True)
@@ -417,11 +425,16 @@ elif menu == "👥 Gestão de Clientes":
                 col_m1, col_m2 = st.columns(2)
                 with col_m1:
                     c_mod = st.text_input("Modelo da Moto")
+                    c_placa = st.text_input("Placa da Moto")
                     c_kme = st.text_input("KM de Entrada")
-                    c_dent = st.text_input("Entrada (DD/MM/AAAA)")
                 with col_m2:
                     c_ano = st.text_input("Ano da Moto")
                     c_kms = st.text_input("KM de Saída")
+                
+                col_datas = st.columns(2)
+                with col_datas[0]:
+                    c_dent = st.text_input("Entrada (DD/MM/AAAA)")
+                with col_datas[1]:
                     c_dsai = st.text_input("Saída (DD/MM/AAAA)")
                 
                 st.write("")
@@ -433,9 +446,9 @@ elif menu == "👥 Gestão de Clientes":
                         conexao = sqlite3.connect(BANCO_DADOS)
                         cursor = conexao.cursor()
                         cursor.execute("""
-                            INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida)
-                            VALUES (?,?,?,?,?,?,?,?,?)
-                        """, (c_nome.strip(), c_end.strip(), c_tel.strip(), c_mod.strip(), c_ano.strip(), c_kme.strip(), c_kms.strip(), c_dent.strip(), c_dsai.strip()))
+                            INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (c_nome.strip(), c_end.strip(), c_tel.strip(), c_mod.strip(), c_ano.strip(), c_kme.strip(), c_kms.strip(), c_dent.strip(), c_dsai.strip(), c_placa.strip().upper()))
                         conexao.commit()
                         conexao.close()
                         st.success("Ficha cadastrada com sucesso!")
@@ -482,7 +495,7 @@ elif menu == "👥 Gestão de Clientes":
             if sel_cli_ed:
                 target_cli_id = cli_dict_ed[sel_cli_ed]
                 conexao = sqlite3.connect(BANCO_DADOS)
-                c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
+                c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
                 conexao.close()
                 
                 with st.form("form_edit_cli"):
@@ -493,11 +506,16 @@ elif menu == "👥 Gestão de Clientes":
                     col_me1, col_me2 = st.columns(2)
                     with col_me1:
                         ec_mod = st.text_input("Modelo da Moto", value=c_info[3] or "")
+                        ec_placa = st.text_input("Placa da Moto", value=c_info[9] or "")
                         ec_kme = st.text_input("KM Entrada", value=c_info[5] or "")
-                        ec_dent = st.text_input("Data Entrada", value=c_info[7] or "")
                     with col_me2:
                         ec_ano = st.text_input("Ano Moto", value=c_info[4] or "")
                         ec_kms = st.text_input("KM Saída", value=c_info[6] or "")
+                    
+                    col_edatas = st.columns(2)
+                    with col_edatas[0]:
+                        ec_dent = st.text_input("Data Entrada", value=c_info[7] or "")
+                    with col_edatas[1]:
                         ec_dsai = st.text_input("Data Saída", value=c_info[8] or "")
                     
                     st.write("")
@@ -514,9 +532,9 @@ elif menu == "👥 Gestão de Clientes":
                             conexao = sqlite3.connect(BANCO_DADOS)
                             cursor = conexao.cursor()
                             cursor.execute("""
-                                UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?
+                                UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?, PlacaMoto=?
                                 WHERE ID=?
-                            """, (ec_nome.strip(), ec_end.strip(), ec_tel.strip(), ec_mod.strip(), ec_ano.strip(), ec_kme.strip(), ec_kms.strip(), ec_dent.strip(), ec_dsai.strip(), target_cli_id))
+                            """, (ec_nome.strip(), ec_end.strip(), ec_tel.strip(), ec_mod.strip(), ec_ano.strip(), ec_kme.strip(), ec_kms.strip(), ec_dent.strip(), ec_dsai.strip(), ec_placa.strip().upper(), target_cli_id))
                             conexao.commit()
                             conexao.close()
                             st.success("Ficha atualizada com sucesso!")
@@ -547,28 +565,28 @@ elif menu == "👥 Gestão de Clientes":
         historico = cursor.fetchall()
         
         # Meta informações
-        cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
+        cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, PlacaMoto FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
         conexao.close()
         
         with st.container(border=True):
-            st.markdown(f"🏍️ **Moto registrada:** {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'})")
+            st.markdown(f"🏍️ **Moto registrada:** {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'}) | **Placa:** `{cli_meta[8] or 'N/A'}`")
             st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
             if historico:
                 df_hist = pd.DataFrame(historico, columns=["OS #", "Data da OS", "Serviços & Peças de Reposição", "Total Orçado (R$)", "Total Pago (R$)"])
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
-                # Gerar PDF do Extrato
+                # Gerar PDF do Extrato (Incluindo Placa no Cabeçalho)
                 def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
                     buffer = io.BytesIO()
                     c = canvas.Canvas(buffer, pagesize=letter)
                     c.setFont("Helvetica-Bold", 16)
                     c.drawString(50, 750, "EXTRATO DE SERVIÇOS - JOTAMOTORS")
 
-                    c.setFont("Helvetica", 12)
+                    c.setFont("Helvetica", 11)
                     c.drawString(50, 720, f"Cliente: {c_meta[0]}")
-                    c.drawString(50, 700, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) | KM: {c_meta[4] or '-'} / {c_meta[5] or '-'}")
-                    c.drawString(50, 680, f"Entrada/Saída: {c_meta[6] or '-'} / {c_meta[7] or '-'}")
+                    c.drawString(50, 700, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) | Placa: {c_meta[8] or 'N/A'}")
+                    c.drawString(50, 680, f"Entrada/Saída: {c_meta[6] or '-'} / {c_meta[7] or '-'} | KM: {c_meta[4] or '-'} / {c_meta[5] or '-'}")
                     c.line(50, 670, 550, 670)
 
                     c.setFont("Helvetica-Bold", 10)
