@@ -124,6 +124,13 @@ def init_db():
         pass
 
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Products(
+        ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
+        Preco REAL, QtdEstoque INTEGER DEFAULT NULL
+    )""")
+
+    # Renomeando tabela se houver conflitos de nomes anteriores
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produtos(
         ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
@@ -630,73 +637,70 @@ elif menu == "👥 Gestão de Clientes":
             st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
             if historico:
+                # Tabela de Histórico Principal
                 df_hist = pd.DataFrame(historico, columns=["OS #", "Data da OS", "Serviços & Peças de Reposição", "Total Orçado (R$)", "Total Pago (R$)"])
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
                 # =========================================================
-                # NOVO: SEÇÃO EXCLUSIVA PARA EDIÇÃO E BAIXA DA OS EM ABERTO
+                # NOVO: SEÇÃO DE EDIÇÃO DIRETA DE VALORES (SINALIZADA)
                 # =========================================================
                 st.write("")
-                st.markdown("#### ✏️ Editar / Atualizar Pagamento da OS")
-                os_ids = [f"OS #{h[0]} - {h[2][:40]}... (Falta pagar: R$ {float(h[3] or 0.0) - float(h[4] or 0.0):.2f})" for h in historico]
-                os_dict = {f"OS #{h[0]} - {h[2][:40]}... (Falta pagar: R$ {float(h[3] or 0.0) - float(h[4] or 0.0):.2f})": h for h in historico}
+                st.markdown("### ✏️ Editar Valores / Registrar Pagamentos")
+                st.caption("Abra as abas abaixo para editar o serviço, alterar o valor total ou registrar o valor pago pelo cliente.")
                 
-                sel_os_ed = st.selectbox("Escolha uma OS listada acima para alterar ou dar baixa financeira:", [""] + os_ids)
-                if sel_os_ed:
-                    os_dados = os_dict[sel_os_ed]
-                    os_id_alvo = os_dados[0]
-                    os_servico_atual = os_dados[2]
-                    os_total_atual = float(os_dados[3] or 0.0)
-                    os_pago_atual = float(os_dados[4] or 0.0)
+                for os_item in historico:
+                    os_id = os_item[0]
+                    os_data = os_item[1]
+                    os_desc = os_item[2]
+                    os_total = float(os_item[3] or 0.0)
+                    os_pago = float(os_item[4] or 0.0)
+                    os_pendente = os_total - os_pago
                     
-                    with st.form(f"form_edit_os_{os_id_alvo}"):
-                        st.info(f"Modificando Registro da **OS #{os_id_alvo}**")
-                        eo_servico = st.text_input("Serviços Realizados / Peças", value=os_servico_atual)
+                    # Definindo se está quitada ou pendente para facilitar a visualização do usuário
+                    if os_pendente > 0:
+                        status_label = f"🔴 Em Aberto (Falta pagar: R$ {os_pendente:.2f})"
+                    else:
+                        status_label = "🟢 Pago / Quitado"
                         
-                        col_eo1, col_eo2 = st.columns(2)
-                        with col_eo1:
-                            eo_total = st.number_input("Valor Total (R$)", min_value=0.0, step=0.01, value=os_total_atual)
-                        with col_eo2:
-                            eo_pago = st.number_input("Valor Pago (R$)", min_value=0.0, step=0.01, value=os_pago_atual)
-                        
-                        saldo_devedor = eo_total - eo_pago
-                        if saldo_devedor > 0:
-                            st.error(f"⚠️ Saldo pendente em aberto: **R$ {saldo_devedor:.2f}**")
-                        elif saldo_devedor == 0:
-                            st.success("✅ Esta Ordem de Serviço está completamente paga!")
-                        else:
-                            st.warning(f"Troco / Crédito para o cliente: **R$ {abs(saldo_devedor):.2f}**")
+                    with st.expander(f"⚙️ OS #{os_id} - {os_desc[:40]}... | {status_label}"):
+                        with st.form(f"form_edit_os_direct_{os_id}"):
+                            eo_servico = st.text_input("Serviços Realizados / Peças", value=os_desc, key=f"desc_{os_id}")
                             
-                        col_ebtn1, col_ebtn2 = st.columns(2)
-                        with col_ebtn1:
-                            btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES FINANCEIRAS", use_container_width=True)
-                        with col_ebtn2:
-                            btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
+                            col_eo1, col_eo2 = st.columns(2)
+                            with col_eo1:
+                                eo_total = st.number_input("Valor Total Orçado (R$)", min_value=0.0, step=0.01, value=os_total, key=f"tot_{os_id}")
+                            with col_eo2:
+                                eo_pago = st.number_input("Valor Pago pelo Cliente (R$)", min_value=0.0, step=0.01, value=os_pago, key=f"pag_{os_id}")
                             
-                        if btn_salvar_os:
-                            conexao = sqlite3.connect(BANCO_DADOS)
-                            cursor = conexao.cursor()
-                            cursor.execute("UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?", 
-                                           (eo_servico.strip(), eo_total, eo_pago, os_id_alvo))
-                            conexao.commit()
-                            conexao.close()
-                            st.success("Ordem de serviço atualizada com sucesso!")
-                            st.rerun()
-                            
-                        if btn_deletar_os:
-                            conexao = sqlite3.connect(BANCO_DADOS)
-                            cursor = conexao.cursor()
-                            
-                            # Buscar se havia produto vinculado para estornar o estoque
-                            v_estorno = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id_alvo,)).fetchone()
-                            if v_estorno and v_estorno[0] and (v_estorno[1] or 0) > 0:
-                                cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (v_estorno[1], v_estorno[0]))
+                            col_ebtn1, col_ebtn2 = st.columns(2)
+                            with col_ebtn1:
+                                btn_salvar_os = st.form_submit_button("💾 SALVAR ALTERAÇÕES", use_container_width=True)
+                            with col_ebtn2:
+                                btn_deletar_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
                                 
-                            cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id_alvo,))
-                            conexao.commit()
-                            conexao.close()
-                            st.success("Ordem de Serviço removida e peças estornadas ao estoque!")
-                            st.rerun()
+                            if btn_salvar_os:
+                                conexao = sqlite3.connect(BANCO_DADOS)
+                                cursor = conexao.cursor()
+                                cursor.execute("UPDATE Vendas SET Servico=?, ValorTotal=?, ValorPago=? WHERE ID=?", 
+                                               (eo_servico.strip(), eo_total, eo_pago, os_id))
+                                conexao.commit()
+                                conexao.close()
+                                st.success(f"OS #{os_id} atualizada com sucesso!")
+                                st.rerun()
+                                
+                            if btn_deletar_os:
+                                conexao = sqlite3.connect(BANCO_DADOS)
+                                cursor = conexao.cursor()
+                                # Estorna as peças de volta ao estoque
+                                v_estorno = cursor.execute("SELECT ProdutoID, QtdVendida FROM Vendas WHERE ID=?", (os_id,)).fetchone()
+                                if v_estorno and v_estorno[0] and (v_estorno[1] or 0) > 0:
+                                    cursor.execute("UPDATE Produtos SET QtdEstoque = QtdEstoque + ? WHERE ID=?", (v_estorno[1], v_estorno[0]))
+                                    
+                                cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id,))
+                                conexao.commit()
+                                conexao.close()
+                                st.success(f"OS #{os_id} removida e estoque recalculado!")
+                                st.rerun()
 
                 st.divider()
                 
