@@ -108,8 +108,9 @@ def init_db():
         Observacoes TEXT
     )""")
 
+    # TABELA CORRIGIDA AQUI: Mudado de Products para Produtos
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS Products(
+    CREATE TABLE IF NOT EXISTS Produtos(
         ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
     )""")
@@ -436,12 +437,12 @@ elif menu == "👥 Gestão de Clientes":
                 col_m1, col_m2 = st.columns(2)
                 with col_m1:
                     c_mod = st.text_input("Modelo da Moto")
-                    c_pla = st.text_input("Placa da Moto")  # CAMPO PLACA ADICIONADO
+                    c_pla = st.text_input("Placa da Moto")
                     c_kme = st.text_input("KM de Entrada")
                     c_dent = st.text_input("Entrada (DD/MM/AAAA)")
                 with col_m2:
                     c_ano = st.text_input("Ano da Moto")
-                    st.write("")  # Ajuste de layout
+                    st.write("")  
                     c_kms = st.text_input("KM de Saída")
                     c_dsai = st.text_input("Saída (DD/MM/AAAA)")
                 
@@ -544,12 +545,12 @@ elif menu == "👥 Gestão de Clientes":
                     col_me1, col_me2 = st.columns(2)
                     with col_me1:
                         ec_mod = st.text_input("Modelo da Moto", value=c_info[3] or "")
-                        ec_pla = st.text_input("Placa da Moto", value=c_info[9] or "")  # CAMPO PLACA NA EDIÇÃO
+                        ec_pla = st.text_input("Placa da Moto", value=c_info[9] or "")  
                         ec_kme = st.text_input("KM Entrada", value=c_info[5] or "")
                         ec_dent = st.text_input("Data Entrada", value=c_info[7] or "")
                     with col_me2:
                         ec_ano = st.text_input("Ano Moto", value=c_info[4] or "")
-                        st.write("")  # Ajuste de layout
+                        st.write("")  
                         ec_kms = st.text_input("KM Saída", value=c_info[6] or "")
                         ec_dsai = st.text_input("Data Saída", value=c_info[8] or "")
                     
@@ -653,7 +654,7 @@ elif menu == "👥 Gestão de Clientes":
                         st.write("")
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
-                            btn_salvar_os = st.form_submit_button("💾 SALVAL VALORES E DADOS", use_container_width=True)
+                            btn_salvar_os = st.form_submit_button("💾 SALVAR VALORES E DADOS", use_container_width=True)
                         with col_btn2:
                             btn_del_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
 
