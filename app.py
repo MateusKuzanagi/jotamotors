@@ -497,7 +497,6 @@ elif menu == "👥 Gestão de Clientes":
                             st.warning("A descrição da OS é obrigatória!")
                         else:
                             data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
-                            # Conversão amigável de datas e horários da OS
                             entrada_completa = f"{os_dt_entrada.strftime('%d/%m/%Y')} {os_hr_entrada.strftime('%H:%M')}"
                             saida_completa = f"{os_dt_saida.strftime('%d/%m/%Y')} {os_hr_saida.strftime('%H:%M')}"
                             
@@ -610,7 +609,7 @@ elif menu == "👥 Gestão de Clientes":
                 
                 # --- NOVA SESSÃO: EDITAR OU EXCLUIR OS ---
                 st.markdown("### ✏️ Editar ou Excluir Lançamento (OS)")
-                os_dict = {f"OS #{d[0]} - {d[2]}": d[0] for d in historico}
+                os_dict = {f"OS #{d[0]} - {d[2]}"[:50] + "...": d[0] for d in historico}
                 sel_os_ed = st.selectbox("Selecione a Ordem de Serviço que deseja alterar ou excluir:", [""] + list(os_dict.keys()))
                 
                 if sel_os_ed:
@@ -674,139 +673,189 @@ elif menu == "👥 Gestão de Clientes":
                             st.rerun()
                 # ----------------------------------------
                 
+                st.write("")
                 # Gerar PDF do Extrato com as Novas Funções Integradas
                 def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
                     buffer = io.BytesIO()
                     c = canvas.Canvas(buffer, pagesize=letter)
-                    c.setFont("Helvetica-Bold", 16)
-                    c.drawString(50, 750, "EXTRATO DE SERVIÇOS - JOTAMOTORS")
-
-                    c.setFont("Helvetica", 12)
-                    c.drawString(50, 720, f"Cliente: {c_meta[0]}")
-                    c.drawString(50, 700, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) | KM: {c_meta[4] or '-'} / {c_meta[5] or '-'}")
-                    c.drawString(50, 680, f"Entrada/Saída: {c_meta[6] or '-'} / {c_meta[7] or '-'}")
-                    c.line(50, 670, 550, 670)
-
-                    c.setFont("Helvetica-Bold", 10)
-                    c.drawString(50, 650, "DETALHAMENTO DOS LANÇAMENTOS")
-                    c.line(50, 645, 550, 645)
-
-                    y = 625
-                    total_extrato = 0.0
-
-                    for d in vendas_lista:
-                        if y < 130:
-                            c.showPage()
-                            y = 750
-                        
-                        c.setFont("Helvetica-Bold", 10)
-                        c.drawString(50, y, f"OS #{d[0]} | Registrado em: {d[1]}")
-                        y -= 15
-                        
-                        c.setFont("Helvetica", 10)
-                        c.drawString(60, y, f"Entrada na Oficina: {d[5] if d[5] else 'N/A'} | Saída: {d[6] if d[6] else 'N/A'}")
-                        y -= 15
-                        c.drawString(60, y, f"Serviço/Peça: {d[2]}")
-                        y -= 15
-                        c.drawString(60, y, f"Forma de Pagamento: {d[7]} | Pago: R$ {d[4]:.2f} / Total Orçado: R$ {d[3]:.2f}")
-                        y -= 15
-                        
-                        if d[8] and str(d[8]).strip() != "":
-                            c.drawString(60, y, f"Anotação Cliente: {d[8]}")
-                            y -= 15
-                        
-                        total_extrato += float(d[3] or 0.0)
-                        c.setStrokeColor(HexColor("#cbd5e1"))
-                        c.setLineWidth(0.5)
-                        c.line(50, y, 550, y)
-                        y -= 15
-
-                    c.line(50, y+5, 550, y+5)
+                    
+                    # Cabeçalho Estilizado
+                    c.setFillColor(HexColor("#020617"))
+                    c.rect(0, 710, 612, 100, fill=True, stroke=False)
+                    
+                    c.setFillColor(HexColor("#06b6d4"))
+                    c.setFont("Helvetica-Bold", 24)
+                    c.drawString(40, 760, "JotaMotors")
+                    
+                    c.setFillColor(HexColor("#f8fafc"))
+                    c.setFont("Helvetica", 10)
+                    c.drawString(40, 740, "SISTEMA DE GERENCIAMENTO DE OFICINA")
+                    c.drawRightString(572, 750, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+                    
+                    # Ficha Cadastral do Cliente
+                    c.setFillColor(HexColor("#0f172a"))
                     c.setFont("Helvetica-Bold", 12)
-                    c.drawString(350, y-20, f"TOTAL DE SERVIÇOS: R$ {total_extrato:.2f}")
-
+                    c.drawString(40, 680, "DADOS DO CLIENTE & VEÍCULO")
+                    c.setStrokeColor(HexColor("#cbd5e1"))
+                    c.setLineWidth(1)
+                    c.line(40, 672, 572, 672)
+                    
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(40, 650, f"Cliente: {c_meta[0]}")
+                    c.setFont("Helvetica", 10)
+                    c.drawString(40, 635, f"Telefone: {c_meta[1] or 'N/A'}")
+                    c.drawString(40, 620, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'})")
+                    c.drawString(320, 650, f"KM Entrada: {c_meta[4] or 'N/A'}")
+                    c.drawString(320, 635, f"KM Saída: {c_meta[5] or 'N/A'}")
+                    c.drawString(320, 620, f"Período: {c_meta[6] or 'N/A'} a {c_meta[7] or 'N/A'}")
+                    
+                    # Tabela de Serviços
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(40, 580, "HISTÓRICO DE ORDENS DE SERVIÇO")
+                    c.line(40, 572, 572, 572)
+                    
+                    # Cabeçalhos da tabela
+                    c.setFont("Helvetica-Bold", 9)
+                    c.drawString(40, 555, "OS #")
+                    c.drawString(80, 555, "DATA")
+                    c.drawString(150, 555, "SERVIÇOS / PEÇAS")
+                    c.drawRightString(400, 555, "TOTAL")
+                    c.drawRightString(480, 555, "PAGO")
+                    c.drawString(500, 555, "FORMA PGTO")
+                    c.line(40, 547, 572, 547)
+                    
+                    y = 530
+                    c.setFont("Helvetica", 9)
+                    total_orcado = 0.0
+                    total_recebido = 0.0
+                    
+                    for v in vendas_lista:
+                        if y < 80: # Se o espaço acabar, cria nova página
+                            c.showPage()
+                            y = 740
+                            c.setFont("Helvetica-Bold", 9)
+                            c.drawString(40, 760, "OS #")
+                            c.drawString(80, 760, "DATA")
+                            c.drawString(150, 760, "SERVIÇOS / PEÇAS")
+                            c.drawRightString(400, 760, "TOTAL")
+                            c.drawRightString(480, 760, "PAGO")
+                            c.drawString(500, 760, "FORMA PGTO")
+                            c.line(40, 752, 572, 752)
+                            c.setFont("Helvetica", 9)
+                        
+                        # ID, Data, Serviço, Total, Pago, Forma
+                        c.drawString(40, y, f"#{v[0]}")
+                        c.drawString(80, y, str(v[1]).split()[0]) # Apenas data sem hora
+                        
+                        # Limita o texto do serviço para não estourar a linha
+                        servico_truncado = str(v[2])[:32] + "..." if len(str(v[2])) > 35 else str(v[2])
+                        c.drawString(150, y, servico_truncado)
+                        
+                        v_total = v[3] if v[3] is not None else 0.0
+                        v_pago = v[4] if v[4] is not None else 0.0
+                        total_orcado += v_total
+                        total_recebido += v_pago
+                        
+                        c.drawRightString(400, y, f"R$ {v_total:.2f}")
+                        c.drawRightString(480, y, f"R$ {v_pago:.2f}")
+                        c.drawString(500, y, str(v[7]))
+                        
+                        y -= 20
+                    
+                    # Totais no rodapé do relatório
+                    c.line(40, y + 10, 572, y + 10)
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(40, y - 10, "RESUMO FINANCEIRO:")
+                    c.drawString(200, y - 10, f"Total Orçado: R$ {total_orcado:.2f}")
+                    c.drawString(380, y - 10, f"Total Pago: R$ {total_recebido:.2f}")
+                    
+                    saldo_restante = total_orcado - total_recebido
+                    if saldo_restante > 0:
+                        c.setFillColor(HexColor("#ef4444"))
+                        c.drawString(200, y - 25, f"Restante a Pagar: R$ {saldo_restante:.2f}")
+                    else:
+                        c.setFillColor(HexColor("#10b981"))
+                        c.drawString(200, y - 25, "CONTA QUITADA")
+                    
                     c.save()
                     buffer.seek(0)
                     return buffer.getvalue()
-                    
+
                 pdf_extrato = gerar_extrato_pdf_bytes(historico, cli_meta)
                 st.download_button(
-                    label="🖨️ Exportar Extrato Completo (PDF)",
+                    label="📕 Gerar PDF de Prontuário & Débitos",
                     data=pdf_extrato,
-                    file_name=f"extrato_{cli_meta[0].replace(' ', '_').lower()}.pdf",
-                    mime="application/pdf"
+                    file_name=f"extrato_jotamotors_{cli_id_h}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
                 )
             else:
-                st.warning("Este cliente não possui histórico de Ordens de Serviços cadastradas.")
+                st.info("Nenhum histórico financeiro ou Ordem de Serviço encontrado para este cliente.")
 
 # ==========================================
-# ABA 3: DESEMPENHO FINANCEIRO DO MÊS
+# ABA 3: DESEMPENHO DO MÊS
 # ==========================================
 elif menu == "📈 Desempenho do Mês":
-    st.subheader("📊 Faturamento do Mês Consolidado")
+    st.subheader("📈 Desempenho e Estatísticas Financeiras")
     
-    hoje = datetime.now()
-    mes_atual_str = hoje.strftime("/%m/%Y")
-
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
-    cursor.execute("SELECT ValorPago, DataCompra FROM Vendas WHERE DataCompra LIKE ?", (f"%{mes_atual_str}%",))
-    vendas = cursor.fetchall()
+    
+    # Capturando dados gerais de vendas
+    cursor.execute("SELECT ValorTotal, ValorPago, DataCompra, FormaPagamento FROM Vendas")
+    dados_graficos = cursor.fetchall()
     conexao.close()
-
-    num_dias = calendar.monthrange(hoje.year, hoje.month)[1]
-    faturamento_diario = {d: 0.0 for d in range(1, num_dias + 1)}
-
-    for valor, data_str in vendas:
-        if valor is None or not data_str:
-            continue
-        try:
-            dia = int(data_str.split()[0].split('/')[0])
-            if dia in faturamento_diario:
-                faturamento_diario[dia] += float(valor)
-        except Exception:
-            pass
-
-    dias = list(faturamento_diario.keys())
-    valores = list(faturamento_diario.values())
-    total_mes = sum(valores)
     
-    # Organização das métricas em colunas
-    col_metrica1, col_metrica2 = st.columns(2)
-    with col_metrica1:
-        with st.container(border=True):
-            st.metric("💰 Faturamento Total do Mês", f"R$ {total_mes:,.2f}")
+    if dados_graficos:
+        df_graficos = pd.DataFrame(dados_graficos, columns=["Valor Total", "Valor Pago", "Data", "Forma Pagamento"])
+        
+        # Agrupamento por Forma de Pagamento
+        df_forma = df_graficos.groupby("Forma Pagamento")["Valor Pago"].sum().reset_index()
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("#### 💰 Faturamento por Tipo de Pagamento")
+            fig, ax = plt.subplots(figsize=(6, 4))
+            fig.patch.set_facecolor('#0f172a')
+            ax.set_facecolor('#1e293b')
             
-    with col_metrica2:
-        with st.container(border=True):
-            media_diaria = total_mes / num_dias
-            st.metric("📅 Média Diária Estimada", f"R$ {media_diaria:,.2f}")
-
-    st.write("")
-    st.markdown("### 📊 Histórico de Evolução Diária")
-    
-    # Configuração e renderização do gráfico usando Matplotlib alinhado ao tema escuro
-    fig, ax = plt.subplots(figsize=(10, 4), facecolor=COR_BG)
-    ax.set_facecolor(COR_CARD)
-    
-    # Plotagem da linha de faturamento diário
-    ax.plot(dias, valores, color=COR_ACCENT_CYAN, marker='o', markersize=4, linewidth=2, label="Faturamento")
-    ax.fill_between(dias, valores, color=COR_ACCENT_CYAN, alpha=0.15)
-    
-    # Personalização dos eixos e textos
-    ax.set_title(f"Faturamento Diário - {hoje.strftime('%m/%Y')}", color=COR_TEXT, fontsize=12, pad=15)
-    ax.set_xlabel("Dia do Mês", color=COR_TEXT_MUTED, fontsize=10)
-    ax.set_ylabel("Valor (R$)", color=COR_TEXT_MUTED, fontsize=10)
-    
-    # Ajustando cores das bordas e marcações para o tema dark
-    ax.tick_params(colors=COR_TEXT_MUTED, labelsize=9)
-    ax.spines['bottom'].set_color(COR_TEXT_MUTED)
-    ax.spines['left'].set_color(COR_TEXT_MUTED)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    
-    # Grade de fundo sutil
-    ax.grid(True, linestyle=":", alpha=0.2, color=COR_TEXT_MUTED)
-    
-    # Exibe o gráfico de forma responsiva dentro do Streamlit
-    st.pyplot(fig)
+            bars = ax.bar(df_forma["Forma Pagamento"], df_forma["Valor Pago"], color="#06b6d4")
+            ax.tick_params(colors='white')
+            ax.spines['bottom'].set_color('white')
+            ax.spines['left'].set_color('white')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            # Adiciona os valores nas barras
+            for bar in bars:
+                height = bar.get_height()
+                ax.annotate(f'R$ {height:.2f}',
+                            xy=(bar.get_x() + bar.get_width() / 2, height),
+                            xytext=(0, 3),  
+                            textcoords="offset points",
+                            ha='center', va='bottom', color='white', fontsize=8)
+            
+            st.pyplot(fig)
+            
+        with col_g2:
+            st.markdown("#### 📊 Evolução de Recebimentos")
+            # Agrupa por dia (Simplificado)
+            df_graficos["Dia"] = df_graficos["Data"].apply(lambda x: x.split()[0] if isinstance(x, str) else x)
+            df_dia = df_graficos.groupby("Dia")["Valor Pago"].sum().reset_index()
+            
+            fig2, ax2 = plt.subplots(figsize=(6, 4))
+            fig2.patch.set_facecolor('#0f172a')
+            ax2.set_facecolor('#1e293b')
+            
+            ax2.plot(df_dia["Dia"], df_dia["Valor Pago"], marker='o', color="#10b981", linewidth=2)
+            ax2.tick_params(colors='white')
+            plt.xticks(rotation=45)
+            ax2.spines['bottom'].set_color('white')
+            ax2.spines['left'].set_color('white')
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            
+            st.pyplot(fig2)
+    else:
+        st.info("Nenhuma venda registrada para gerar relatórios visuais.")
