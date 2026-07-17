@@ -5,8 +5,6 @@ import io
 import calendar
 import pandas as pd
 import matplotlib.pyplot as plt
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -19,10 +17,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# BANCO DE DADOS E GOOGLE SHEETS
+# BANCO DE DADOS
 BANCO_DADOS = "JotaMotors_Completo.db"
-ARQUIVO_CREDENCIAIS = "credenciais.json"  # Seu arquivo de chaves do Google Cloud
-NOME_PLANILHA = "JotaMotors_AppSheet"       # Nome exato da sua Planilha no Drive
 
 # Identidade Visual do JotaMotors
 COR_BG = "#0f172a"          
@@ -36,50 +32,17 @@ COR_ACCENT_GREEN = "#10b981"
 COR_ACCENT_RED = "#ef4444"  
 
 # ==========================================
-# FUNÇÃO DE SINCRONIZAÇÃO AUTOMÁTICA
-# ==========================================
-def sincronizar_com_appsheet():
-    """Lê o SQLite local e atualiza as abas da planilha do Google Sheets."""
-    try:
-        escopos = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        credenciais = ServiceAccountCredentials.from_json_keyfile_name(ARQUIVO_CREDENCIAIS, escopos)
-        cliente_gspread = gspread.authorize(credenciais)
-        planilha = cliente_gspread.open(NOME_PLANILHA)
-        
-        conexao = sqlite3.connect(BANCO_DADOS)
-        tabelas = ["Clientes", "Vendas", "Produtos"]
-        
-        for tabela in tabelas:
-            df = pd.read_sql_query(f"SELECT * FROM {tabela}", conexao)
-            df = df.fillna("").astype(str)
-            
-            try:
-                aba = planilha.worksheet(tabela)
-            except gspread.exceptions.WorksheetNotFound:
-                aba = planilha.add_worksheet(title=tabela, rows="100", cols="20")
-            
-            aba.clear()
-            cabecalho = df.columns.tolist()
-            valores = df.values.tolist()
-            aba.update("A1", [cabecalho] + valores)
-            
-        conexao.close()
-        st.toast("⚡ AppSheet sincronizado com sucesso!", icon="🔄")
-    except Exception as e:
-        st.error(f"Erro na sincronização automática do AppSheet: {e}")
-
-# ==========================================
 # CSS CUSTOMIZADO PARA CORRIGIR O LAYOUT
 # ==========================================
 st.markdown("""
     <style>
+    /* Estilização dos blocos e espaçamentos */
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 3rem !important;
     }
+    
+    /* Customização dos botões padrões do Streamlit */
     div.stButton > button {
         background-color: #06b6d4 !important;
         color: white !important;
@@ -93,12 +56,16 @@ st.markdown("""
         background-color: #0891b2 !important;
         transform: translateY(-1px);
     }
+    
+    /* Botões vermelhos (como Excluir) */
     div.stButton > button[key*="excluir"] {
         background-color: #ef4444 !important;
     }
     div.stButton > button[key*="excluir"]:hover {
         background-color: #dc2626 !important;
     }
+
+    /* Ajuste para inputs ficarem alinhados */
     .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
         border-color: #334155 !important;
         border-radius: 6px !important;
@@ -126,6 +93,7 @@ def init_db():
         Placa TEXT DEFAULT ''
     )""")
 
+    # Criação da tabela de Vendas/OS incluindo as colunas
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Vendas(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -140,13 +108,16 @@ def init_db():
         Observacoes TEXT
     )""")
 
+    # TABELA CORRIGIDA AQUI: Mudado de Products para Produtos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produtos(
         ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
     )""")
 
-    # Migrations
+    # ---------------------------------------------------------
+    # MIGRATIONS: Adicionar colunas novas se as tabelas já existiam
+    # ---------------------------------------------------------
     cursor.execute("PRAGMA table_info(Clientes)")
     colunas_clientes = [col[1] for col in cursor.fetchall()]
     if "Placa" not in colunas_clientes:
@@ -163,6 +134,7 @@ def init_db():
     if "Observacoes" not in colunas_vendas:
         cursor.execute("ALTER TABLE Vendas ADD COLUMN Observacoes TEXT DEFAULT ''")
 
+    # Usuários Padrão
     usuarios_padrao = [('admin', '123'), ('maironxd', '14125'), ('luana', '14125'), ('josue', '123')]
     for user, senha in usuarios_padrao:
         cursor.execute("SELECT * FROM Usuarios WHERE Nome=?", (user,))
@@ -188,20 +160,25 @@ def verificar_login(u, p):
     conexao.close()
     return usuario
 
+# Tela de Login Centralizada e Compacta
 if not st.session_state['logged_in']:
     st.write("")
     st.write("")
     st.write("")
+    
     col_lateral_esq, col_login_central, col_lateral_dir = st.columns([1, 1.2, 1])
+    
     with col_login_central:
         st.markdown("<h1 style='text-align: center; color: #06b6d4; margin-bottom: 0px;'>🔑 JotaMotors ERP</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 20px;'>Painel de Gestão e Login Integrado</p>", unsafe_allow_html=True)
+        
         with st.container(border=True):
             with st.form("login_form", clear_on_submit=False):
                 user_input = st.text_input("Usuário")
                 pass_input = st.text_input("Senha", type="password")
                 st.write("")
                 entrar = st.form_submit_button("ENTRAR NO SISTEMA", use_container_width=True)
+                
                 if entrar:
                     usuario_valido = verificar_login(user_input, pass_input)
                     if usuario_valido:
@@ -213,7 +190,11 @@ if not st.session_state['logged_in']:
                         st.error("Usuário ou Senha incorretos!")
     st.stop()
 
-# NAV BAR
+# ==========================================
+# CÓDIGO DO SISTEMA (APÓS LOGIN)
+# ==========================================
+
+# Barra Lateral de Navegação
 st.sidebar.markdown(f"### 👤 Usuário: **{st.session_state['user']}**")
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state['logged_in'] = False
@@ -226,6 +207,7 @@ menu = st.sidebar.radio(
     ["📊 Dashboard & Estoque", "👥 Gestão de Clientes", "📈 Desempenho do Mês"]
 )
 
+# Cabeçalho Fixo do JotaMotors
 col_logo, col_logo_dir = st.columns([2, 1])
 with col_logo:
     st.markdown("<h1 style='color: #06b6d4; margin-bottom: 0px; padding-bottom:0px;'>JotaMotors</h1>", unsafe_allow_html=True)
@@ -237,6 +219,7 @@ st.divider()
 # ABA 1: DASHBOARD & ESTOQUE
 # ==========================================
 if menu == "📊 Dashboard & Estoque":
+    
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
     cursor.execute("SELECT * FROM Produtos")
@@ -277,7 +260,9 @@ if menu == "📊 Dashboard & Estoque":
             st.metric("⚠️ Alerta Estoque Baixo", f"{estoque_baixo} itens", delta="- Crítico" if estoque_baixo > 0 else "OK", delta_color="inverse")
 
     st.write("")
+    
     st.subheader("📦 Consulta de Estoque de Peças")
+    
     df_prod = pd.DataFrame(dados_produtos, columns=["CÓDIGO/ID", "NOME DO PRODUTO", "DESCRIÇÃO", "PREÇO R$", "QTD ESTOQUE"])
     
     col_filtro, col_b1, col_b2 = st.columns([3, 1, 1])
@@ -314,6 +299,7 @@ if menu == "📊 Dashboard & Estoque":
             c.drawString(350, 720, "PREÇO")
             c.drawString(450, 720, "ESTOQUE")
             c.line(50, 715, 550, 715)
+
             y = 700
             c.setFont("Helvetica", 10)
             for d in dados:
@@ -339,6 +325,7 @@ if menu == "📊 Dashboard & Estoque":
         )
 
     st.divider()
+    
     col_cad, col_ed = st.columns(2)
 
     with col_cad:
@@ -350,6 +337,7 @@ if menu == "📊 Dashboard & Estoque":
                 new_desc = st.text_input("Descrição")
                 new_preco = st.number_input("Preço Unitário (R$)", min_value=0.0, step=0.01)
                 new_qtd = st.number_input("Quantidade Inicial em Estoque", min_value=0, step=1, value=0)
+                
                 salvar_novo = st.form_submit_button("CADASTRAR PRODUTO", use_container_width=True)
                 if salvar_novo:
                     if not new_cod.strip() or not new_nome.strip():
@@ -363,7 +351,6 @@ if menu == "📊 Dashboard & Estoque":
                             conexao.commit()
                             conexao.close()
                             st.success("Produto adicionado com sucesso!")
-                            sincronizar_com_appsheet() # AUTOMÁTICO
                             st.rerun()
                         except sqlite3.IntegrityError:
                             st.error("Este Código/ID já existe no banco de dados!")
@@ -373,6 +360,7 @@ if menu == "📊 Dashboard & Estoque":
         with st.container(border=True):
             prod_ids = [p[0] for p in dados_produtos]
             selected_prod_id = st.selectbox("Escolha um produto para editar", [""] + prod_ids)
+            
             if selected_prod_id:
                 selected_prod = [p for p in dados_produtos if p[0] == selected_prod_id][0]
                 with st.form("form_edit_prod"):
@@ -399,7 +387,6 @@ if menu == "📊 Dashboard & Estoque":
                             conexao.commit()
                             conexao.close()
                             st.success("Alterações salvas!")
-                            sincronizar_com_appsheet() # AUTOMÁTICO
                             st.rerun()
                             
                     if btn_excluir:
@@ -409,7 +396,6 @@ if menu == "📊 Dashboard & Estoque":
                         conexao.commit()
                         conexao.close()
                         st.success("Produto removido!")
-                        sincronizar_com_appsheet() # AUTOMÁTICO
                         st.rerun()
 
 # ==========================================
@@ -417,6 +403,7 @@ if menu == "📊 Dashboard & Estoque":
 # ==========================================
 elif menu == "👥 Gestão de Clientes":
     st.subheader("👥 Fichas de Clientes e Ordens de Serviços")
+    
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
     cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, DataEntrada, DataSaida, Placa FROM Clientes")
@@ -424,6 +411,7 @@ elif menu == "👥 Gestão de Clientes":
     conexao.close()
     
     df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Data Entrada", "Data Saída", "Placa"])
+    
     busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome, Modelo ou Placa da Moto):", placeholder="Ex: Honda CG, João, ABC1D23...")
     if busca_cli:
         df_cli = df_cli[
@@ -431,9 +419,11 @@ elif menu == "👥 Gestão de Clientes":
             df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False) |
             df_cli['Placa'].astype(str).str.contains(busca_cli, case=False)
         ]
+        
     st.dataframe(df_cli, use_container_width=True, hide_index=True)
 
     st.divider()
+    
     col_c1, col_c2 = st.columns(2)
     
     with col_c1:
@@ -471,17 +461,18 @@ elif menu == "👥 Gestão de Clientes":
                         conexao.commit()
                         conexao.close()
                         st.success("Ficha cadastrada com sucesso!")
-                        sincronizar_com_appsheet() # AUTOMÁTICO
                         st.rerun()
 
         st.markdown("### 🛠️ Registrar Ordem de Serviço (Venda)")
         with st.container(border=True):
             cli_dict = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
             sel_cli_venda = st.selectbox("Escolha o Cliente para associar a OS", [""] + list(cli_dict.keys()))
+            
             if sel_cli_venda:
                 target_cli_id = cli_dict[sel_cli_venda]
                 with st.form("form_lancar_os", clear_on_submit=True):
                     os_desc = st.text_input("Serviços Realizados / Peças Trocadas*")
+                    
                     col_dt_e, col_dt_s = st.columns(2)
                     with col_dt_e:
                         os_dt_entrada = st.date_input("Data de Entrada", value=datetime.now().date())
@@ -498,11 +489,16 @@ elif menu == "👥 Gestão de Clientes":
                     
                     col_p_obs1, col_p_obs2 = st.columns([1, 1])
                     with col_p_obs1:
-                        os_forma_pagamento = st.selectbox("Forma de Pagamento", options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"])
+                        os_forma_pagamento = st.selectbox(
+                            "Forma de Pagamento", 
+                            options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
+                        )
+                    
                     with col_p_obs2:
                         st.write("")
 
-                    os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente")
+                    os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente", placeholder="Escreva observações aqui...")
+
                     st.write("")
                     gravar_os = st.form_submit_button("LANÇAR ORDEM DE SERVIÇO", use_container_width=True)
                     if gravar_os:
@@ -527,7 +523,6 @@ elif menu == "👥 Gestão de Clientes":
                             conexao.commit()
                             conexao.close()
                             st.success("Ordem de serviço registrada com sucesso!")
-                            sincronizar_com_appsheet() # AUTOMÁTICO
                             st.rerun()
 
     with col_c2:
@@ -535,6 +530,7 @@ elif menu == "👥 Gestão de Clientes":
         with st.container(border=True):
             cli_dict_ed = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
             sel_cli_ed = st.selectbox("Escolha o cliente para atualizar", [""] + list(cli_dict_ed.keys()))
+            
             if sel_cli_ed:
                 target_cli_id = cli_dict_ed[sel_cli_ed]
                 conexao = sqlite3.connect(BANCO_DADOS)
@@ -578,7 +574,6 @@ elif menu == "👥 Gestão de Clientes":
                             conexao.commit()
                             conexao.close()
                             st.success("Ficha atualizada com sucesso!")
-                            sincronizar_com_appsheet() # AUTOMÁTICO
                             st.rerun()
                             
                     if submit_del_cli:
@@ -589,11 +584,12 @@ elif menu == "👥 Gestão de Clientes":
                         conexao.commit()
                         conexao.close()
                         st.success("Cliente removido permanentemente!")
-                        sincronizar_com_appsheet() # AUTOMÁTICO
                         st.rerun()
 
+    # Histórico de Serviços / Gerador de Extrato
     st.divider()
     st.subheader("📜 Extrato e Histórico de Prontuários")
+    
     cli_dict_h = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
     sel_cli_hist = st.selectbox("Selecione o Cliente para detalhar o extrato financeiro", [""] + list(cli_dict_h.keys()))
     
@@ -606,6 +602,8 @@ elif menu == "👥 Gestão de Clientes":
             FROM Vendas WHERE ClienteID=? ORDER BY ID DESC
         """, (cli_id_h,))
         historico = cursor.fetchall()
+        
+        # Meta informações com a Placa integrada
         cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
         conexao.close()
         
@@ -614,9 +612,13 @@ elif menu == "👥 Gestão de Clientes":
             st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
             if historico:
-                df_hist = pd.DataFrame(historico, columns=["OS #", "Data Lançamento", "Serviços & Peças de Reposição", "Total Orçado (R$)", "Total Pago (R$)", "Entrada Oficial", "Saída Oficial", "Forma Pagamento", "Anotações / Obs"])
+                df_hist = pd.DataFrame(historico, columns=[
+                    "OS #", "Data Lançamento", "Serviços & Peças de Reposição", 
+                    "Total Orçado (R$)", "Total Pago (R$)", "Entrada Oficial", "Saída Oficial", "Forma Pagamento", "Anotações / Obs"
+                ])
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
+                # --- NOVA SESSÃO: EDITAR OU EXCLUIR OS ---
                 st.markdown("### ✏️ Editar ou Excluir Lançamento (OS)")
                 os_dict = {f"OS #{d[0]} - {d[2]}"[:50] + "...": d[0] for d in historico}
                 sel_os_ed = st.selectbox("Selecione a Ordem de Serviço que deseja alterar ou excluir:", [""] + list(os_dict.keys()))
@@ -628,6 +630,7 @@ elif menu == "👥 Gestão de Clientes":
                     with st.form("form_edit_os"):
                         st.info(f"Alterando OS #{os_id_target}")
                         edit_servico = st.text_input("Serviços & Peças de Reposição", value=cur_os[2])
+                        
                         col_v1, col_v2 = st.columns(2)
                         with col_v1:
                             edit_vtotal = st.number_input("Total Orçado (R$)", value=float(cur_os[3] or 0.0), step=0.01)
@@ -669,7 +672,6 @@ elif menu == "👥 Gestão de Clientes":
                                 conexao.commit()
                                 conexao.close()
                                 st.success("Ordem de Serviço atualizada com sucesso!")
-                                sincronizar_com_appsheet() # AUTOMÁTICO
                                 st.rerun()
 
                         if btn_del_os:
@@ -678,74 +680,193 @@ elif menu == "👥 Gestão de Clientes":
                             cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id_target,))
                             conexao.commit()
                             conexao.close()
-                            st.success("Ordem de Serviço excluída!")
-                            sincronizar_com_appsheet() # AUTOMÁTICO
+                            st.success("Ordem de Serviço excluída permanentemente!")
                             st.rerun()
+                # ----------------------------------------
+                
+                st.write("")
+                # Gerar PDF do Extrato com as Novas Funções Integradas
+                def gerar_extrato_pdf_bytes(vendas_lista, c_meta):
+                    buffer = io.BytesIO()
+                    c = canvas.Canvas(buffer, pagesize=letter)
+                    
+                    # Cabeçalho Estilizado
+                    c.setFillColor(HexColor("#020617"))
+                    c.rect(0, 710, 612, 100, fill=True, stroke=False)
+                    
+                    c.setFillColor(HexColor("#06b6d4"))
+                    c.setFont("Helvetica-Bold", 24)
+                    c.drawString(40, 760, "JotaMotors")
+                    
+                    c.setFillColor(HexColor("#f8fafc"))
+                    c.setFont("Helvetica", 10)
+                    c.drawString(40, 740, "SISTEMA DE GERENCIAMENTO DE OFICINA")
+                    c.drawRightString(572, 750, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+                    
+                    # Ficha Cadastral do Cliente
+                    c.setFillColor(HexColor("#0f172a"))
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(40, 680, "DADOS DO CLIENTE & VEÍCULO")
+                    c.setStrokeColor(HexColor("#cbd5e1"))
+                    c.setLineWidth(1)
+                    c.line(40, 672, 572, 672)
+                    
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(40, 650, f"Cliente: {c_meta[0]}")
+                    c.setFont("Helvetica", 10)
+                    c.drawString(40, 635, f"Telefone: {c_meta[1] or 'N/A'}")
+                    c.drawString(40, 620, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) - Placa: {c_meta[8] or 'N/A'}")
+                    c.drawString(320, 650, f"KM Entrada: {c_meta[4] or 'N/A'}")
+                    c.drawString(320, 635, f"KM Saída: {c_meta[5] or 'N/A'}")
+                    c.drawString(320, 620, f"Período: {c_meta[6] or 'N/A'} a {c_meta[7] or 'N/A'}")
+                    
+                    # Tabela de Serviços
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(40, 580, "HISTÓRICO DE ORDENS DE SERVIÇO")
+                    c.line(40, 572, 572, 572)
+                    
+                    # Cabeçalhos da tabela
+                    c.setFont("Helvetica-Bold", 9)
+                    c.drawString(40, 555, "OS #")
+                    c.drawString(80, 555, "DATA")
+                    c.drawString(150, 555, "SERVIÇOS / PEÇAS")
+                    c.drawRightString(400, 555, "TOTAL")
+                    c.drawRightString(480, 555, "PAGO")
+                    c.drawString(500, 555, "FORMA PGTO")
+                    c.line(40, 547, 572, 547)
+                    
+                    y = 530
+                    c.setFont("Helvetica", 9)
+                    total_orcado = 0.0
+                    total_recebido = 0.0
+                    
+                    for v in vendas_lista:
+                        if y < 80: # Se o espaço acabar, cria nova página
+                            c.showPage()
+                            y = 740
+                            c.setFont("Helvetica-Bold", 9)
+                            c.drawString(40, 760, "OS #")
+                            c.drawString(80, 760, "DATA")
+                            c.drawString(150, 760, "SERVIÇOS / PEÇAS")
+                            c.drawRightString(400, 760, "TOTAL")
+                            c.drawRightString(480, 760, "PAGO")
+                            c.drawString(500, 760, "FORMA PGTO")
+                            c.line(40, 752, 572, 752)
+                            c.setFont("Helvetica", 9)
+                        
+                        # ID, Data, Serviço, Total, Pago, Forma
+                        c.drawString(40, y, f"#{v[0]}")
+                        c.drawString(80, y, str(v[1]).split()[0]) # Apenas data sem hora
+                        
+                        # Limita o texto do serviço para não estourar a linha
+                        servico_truncado = str(v[2])[:32] + "..." if len(str(v[2])) > 35 else str(v[2])
+                        c.drawString(150, y, servico_truncado)
+                        
+                        v_total = v[3] if v[3] is not None else 0.0
+                        v_pago = v[4] if v[4] is not None else 0.0
+                        total_orcado += v_total
+                        total_recebido += v_pago
+                        
+                        c.drawRightString(400, y, f"R$ {v_total:.2f}")
+                        c.drawRightString(480, y, f"R$ {v_pago:.2f}")
+                        c.drawString(500, y, str(v[7]))
+                        
+                        y -= 20
+                    
+                    # Totais no rodapé do relatório
+                    c.line(40, y + 10, 572, y + 10)
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(40, y - 10, "RESUMO FINANCEIRO:")
+                    c.drawString(200, y - 10, f"Total Orçado: R$ {total_orcado:.2f}")
+                    c.drawString(380, y - 10, f"Total Pago: R$ {total_recebido:.2f}")
+                    
+                    saldo_restante = total_orcado - total_recebido
+                    if saldo_restante > 0:
+                        c.setFillColor(HexColor("#ef4444"))
+                        c.drawString(200, y - 25, f"Restante a Pagar: R$ {saldo_restante:.2f}")
+                    else:
+                        c.setFillColor(HexColor("#10b981"))
+                        c.drawString(200, y - 25, "CONTA QUITADA")
+                    
+                    c.save()
+                    buffer.seek(0)
+                    return buffer.getvalue()
+
+                pdf_extrato = gerar_extrato_pdf_bytes(historico, cli_meta)
+                st.download_button(
+                    label="📕 Gerar PDF de Prontuário & Débitos",
+                    data=pdf_extrato,
+                    file_name=f"extrato_jotamotors_{cli_id_h}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
             else:
-                st.info("Este cliente ainda não possui ordens de serviços lançadas.")
+                st.info("Nenhum histórico financeiro ou Ordem de Serviço encontrado para este cliente.")
 
 # ==========================================
 # ABA 3: DESEMPENHO DO MÊS
 # ==========================================
 elif menu == "📈 Desempenho do Mês":
-    st.subheader("📈 Desempenho Financeiro & Métricas Mensais")
+    st.subheader("📈 Desempenho e Estatísticas Financeiras")
+    
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
-    cursor.execute("""
-        SELECT V.ID, C.Nome, V.Servico, V.ValorTotal, V.ValorPago, V.DataCompra, V.FormaPagamento 
-        FROM Vendas V 
-        LEFT JOIN Clientes C ON V.ClienteID = C.ID
-    """)
-    todas_vendas = cursor.fetchall()
+    
+    # Capturando dados gerais de vendas
+    cursor.execute("SELECT ValorTotal, ValorPago, DataCompra, FormaPagamento FROM Vendas")
+    dados_graficos = cursor.fetchall()
     conexao.close()
     
-    if todas_vendas:
-        df_vendas = pd.DataFrame(todas_vendas, columns=["ID", "Cliente", "Serviço", "Valor Total", "Valor Pago", "Data", "Pagamento"])
-        mes_atual_nome = datetime.now().strftime("/%m/%Y")
-        df_vendas['NoMes'] = df_vendas['Data'].apply(lambda x: mes_atual_nome in str(x))
-        df_mes = df_vendas[df_vendas['NoMes'] == True].copy()
+    if dados_graficos:
+        df_graficos = pd.DataFrame(dados_graficos, columns=["Valor Total", "Valor Pago", "Data", "Forma Pagamento"])
         
-        if not df_mes.empty:
-            total_orcado = df_mes['Valor Total'].sum()
-            total_pago = df_mes['Valor Pago'].sum()
-            restante_receber = total_orcado - total_pago
+        # Agrupamento por Forma de Pagamento
+        df_forma = df_graficos.groupby("Forma Pagamento")["Valor Pago"].sum().reset_index()
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("#### 💰 Faturamento por Tipo de Pagamento")
+            fig, ax = plt.subplots(figsize=(6, 4))
+            fig.patch.set_facecolor('#0f172a')
+            ax.set_facecolor('#1e293b')
             
-            m1, m2, m3, m4 = st.columns(4)
-            with m1:
-                with st.container(border=True):
-                    st.metric("📊 Total de OS (Mês)", f"{len(df_mes)} ordens")
-            with m2:
-                with st.container(border=True):
-                    st.metric("💰 Total Faturado", f"R$ {total_orcado:,.2f}")
-            with m3:
-                with st.container(border=True):
-                    st.metric("🟢 Valor Recebido", f"R$ {total_pago:,.2f}")
-            with m4:
-                with st.container(border=True):
-                    st.metric("🔴 A Receber (Pendentes)", f"R$ {restante_receber:,.2f}")
-                    
-            st.divider()
-            col_g1, col_g2 = st.columns([1.5, 1])
-            with col_g1:
-                st.write("📊 **Faturamento Mensal por Forma de Pagamento**")
-                df_pagamentos = df_mes.groupby('Pagamento')['Valor Pago'].sum().reset_index()
-                fig, ax = plt.subplots(figsize=(6, 3))
-                fig.patch.set_facecolor('#1e293b')
-                ax.set_facecolor('#1e293b')
-                cores = ['#06b6d4', '#3b82f6', '#10b981', '#ef4444']
-                ax.bar(df_pagamentos['Pagamento'], df_pagamentos['Valor Pago'], color=cores[:len(df_pagamentos)])
-                ax.tick_params(colors='#f8fafc', labelsize=8)
-                ax.spines['bottom'].set_color('#94a3b8')
-                ax.spines['top'].set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.spines['left'].set_color('#94a3b8')
-                ax.set_ylabel("Valor (R$)", color='#f8fafc', fontsize=8)
-                st.pyplot(fig)
-                
-            with col_g2:
-                st.write("📋 **Lista das Últimas Vendas do Mês**")
-                st.dataframe(df_mes[["Cliente", "Valor Total", "Valor Pago", "Pagamento"]].tail(5), use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhuma venda ou OS registrada no mês corrente até o momento.")
+            bars = ax.bar(df_forma["Forma Pagamento"], df_forma["Valor Pago"], color="#06b6d4")
+            ax.tick_params(colors='white')
+            ax.spines['bottom'].set_color('white')
+            ax.spines['left'].set_color('white')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            # Adiciona os valores nas barras
+            for bar in bars:
+                height = bar.get_height()
+                ax.annotate(f'R$ {height:.2f}',
+                            xy=(bar.get_x() + bar.get_width() / 2, height),
+                            xytext=(0, 3),  
+                            textcoords="offset points",
+                            ha='center', va='bottom', color='white', fontsize=8)
+            
+            st.pyplot(fig)
+            
+        with col_g2:
+            st.markdown("#### 📊 Evolução de Recebimentos")
+            # Agrupa por dia (Simplificado)
+            df_graficos["Dia"] = df_graficos["Data"].apply(lambda x: x.split()[0] if isinstance(x, str) else x)
+            df_dia = df_graficos.groupby("Dia")["Valor Pago"].sum().reset_index()
+            
+            fig2, ax2 = plt.subplots(figsize=(6, 4))
+            fig2.patch.set_facecolor('#0f172a')
+            ax2.set_facecolor('#1e293b')
+            
+            ax2.plot(df_dia["Dia"], df_dia["Valor Pago"], marker='o', color="#10b981", linewidth=2)
+            ax2.tick_params(colors='white')
+            plt.xticks(rotation=45)
+            ax2.spines['bottom'].set_color('white')
+            ax2.spines['left'].set_color('white')
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            
+            st.pyplot(fig2)
     else:
-        st.info("Ainda não existem vendas ou faturamentos registrados no banco de dados.")
+        st.info("Nenhuma venda registrada para gerar relatórios visuais.")
