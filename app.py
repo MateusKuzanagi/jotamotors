@@ -89,10 +89,11 @@ def init_db():
     CREATE TABLE IF NOT EXISTS Clientes(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT, Endereco TEXT,
         Telefone TEXT, ModeloMoto TEXT, AnoMoto TEXT, KM TEXT,
-        KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT
+        KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT,
+        Placa TEXT DEFAULT ''
     )""")
 
-    # Criação da tabela de Vendas/OS incluindo as novas colunas
+    # Criação da tabela de Vendas/OS incluindo as colunas
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Vendas(
         ID INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -108,17 +109,21 @@ def init_db():
     )""")
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS Produtos(
+    CREATE TABLE IF NOT EXISTS Products(
         ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
         Preco REAL, QtdEstoque INTEGER DEFAULT NULL
     )""")
 
     # ---------------------------------------------------------
-    # MIGRATION: Adicionar colunas novas se a tabela já existia
+    # MIGRATIONS: Adicionar colunas novas se as tabelas já existiam
     # ---------------------------------------------------------
+    cursor.execute("PRAGMA table_info(Clientes)")
+    colunas_clientes = [col[1] for col in cursor.fetchall()]
+    if "Placa" not in colunas_clientes:
+        cursor.execute("ALTER TABLE Clientes ADD COLUMN Placa TEXT DEFAULT ''")
+
     cursor.execute("PRAGMA table_info(Vendas)")
     colunas_vendas = [col[1] for col in cursor.fetchall()]
-    
     if "DataHoraEntrada" not in colunas_vendas:
         cursor.execute("ALTER TABLE Vendas ADD COLUMN DataHoraEntrada TEXT DEFAULT ''")
     if "DataHoraSaida" not in colunas_vendas:
@@ -400,17 +405,18 @@ elif menu == "👥 Gestão de Clientes":
     
     conexao = sqlite3.connect(BANCO_DADOS)
     cursor = conexao.cursor()
-    cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, DataEntrada, DataSaida FROM Clientes")
+    cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, DataEntrada, DataSaida, Placa FROM Clientes")
     dados_clientes = cursor.fetchall()
     conexao.close()
     
-    df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Data Entrada", "Data Saída"])
+    df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Data Entrada", "Data Saída", "Placa"])
     
-    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome ou Modelo da Moto):", placeholder="Ex: Honda CG, João...")
+    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome, Modelo ou Placa da Moto):", placeholder="Ex: Honda CG, João, ABC1D23...")
     if busca_cli:
         df_cli = df_cli[
             df_cli['Nome do Cliente'].astype(str).str.contains(busca_cli, case=False) |
-            df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False)
+            df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False) |
+            df_cli['Placa'].astype(str).str.contains(busca_cli, case=False)
         ]
         
     st.dataframe(df_cli, use_container_width=True, hide_index=True)
@@ -430,10 +436,12 @@ elif menu == "👥 Gestão de Clientes":
                 col_m1, col_m2 = st.columns(2)
                 with col_m1:
                     c_mod = st.text_input("Modelo da Moto")
+                    c_pla = st.text_input("Placa da Moto")  # CAMPO PLACA ADICIONADO
                     c_kme = st.text_input("KM de Entrada")
                     c_dent = st.text_input("Entrada (DD/MM/AAAA)")
                 with col_m2:
                     c_ano = st.text_input("Ano da Moto")
+                    st.write("")  # Ajuste de layout
                     c_kms = st.text_input("KM de Saída")
                     c_dsai = st.text_input("Saída (DD/MM/AAAA)")
                 
@@ -446,9 +454,9 @@ elif menu == "👥 Gestão de Clientes":
                         conexao = sqlite3.connect(BANCO_DADOS)
                         cursor = conexao.cursor()
                         cursor.execute("""
-                            INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida)
-                            VALUES (?,?,?,?,?,?,?,?,?)
-                        """, (c_nome.strip(), c_end.strip(), c_tel.strip(), c_mod.strip(), c_ano.strip(), c_kme.strip(), c_kms.strip(), c_dent.strip(), c_dsai.strip()))
+                            INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (c_nome.strip(), c_end.strip(), c_tel.strip(), c_mod.strip(), c_ano.strip(), c_kme.strip(), c_kms.strip(), c_dent.strip(), c_dsai.strip(), c_pla.strip().upper()))
                         conexao.commit()
                         conexao.close()
                         st.success("Ficha cadastrada com sucesso!")
@@ -525,7 +533,7 @@ elif menu == "👥 Gestão de Clientes":
             if sel_cli_ed:
                 target_cli_id = cli_dict_ed[sel_cli_ed]
                 conexao = sqlite3.connect(BANCO_DADOS)
-                c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
+                c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
                 conexao.close()
                 
                 with st.form("form_edit_cli"):
@@ -536,10 +544,12 @@ elif menu == "👥 Gestão de Clientes":
                     col_me1, col_me2 = st.columns(2)
                     with col_me1:
                         ec_mod = st.text_input("Modelo da Moto", value=c_info[3] or "")
+                        ec_pla = st.text_input("Placa da Moto", value=c_info[9] or "")  # CAMPO PLACA NA EDIÇÃO
                         ec_kme = st.text_input("KM Entrada", value=c_info[5] or "")
                         ec_dent = st.text_input("Data Entrada", value=c_info[7] or "")
                     with col_me2:
                         ec_ano = st.text_input("Ano Moto", value=c_info[4] or "")
+                        st.write("")  # Ajuste de layout
                         ec_kms = st.text_input("KM Saída", value=c_info[6] or "")
                         ec_dsai = st.text_input("Data Saída", value=c_info[8] or "")
                     
@@ -557,9 +567,9 @@ elif menu == "👥 Gestão de Clientes":
                             conexao = sqlite3.connect(BANCO_DADOS)
                             cursor = conexao.cursor()
                             cursor.execute("""
-                                UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?
+                                UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?, Placa=?
                                 WHERE ID=?
-                            """, (ec_nome.strip(), ec_end.strip(), ec_tel.strip(), ec_mod.strip(), ec_ano.strip(), ec_kme.strip(), ec_kms.strip(), ec_dent.strip(), ec_dsai.strip(), target_cli_id))
+                            """, (ec_nome.strip(), ec_end.strip(), ec_tel.strip(), ec_mod.strip(), ec_ano.strip(), ec_kme.strip(), ec_kms.strip(), ec_dent.strip(), ec_dsai.strip(), ec_pla.strip().upper(), target_cli_id))
                             conexao.commit()
                             conexao.close()
                             st.success("Ficha atualizada com sucesso!")
@@ -592,12 +602,12 @@ elif menu == "👥 Gestão de Clientes":
         """, (cli_id_h,))
         historico = cursor.fetchall()
         
-        # Meta informações
-        cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
+        # Meta informações com a Placa integrada
+        cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
         conexao.close()
         
         with st.container(border=True):
-            st.markdown(f"🏍️ **Moto registrada:** {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'})")
+            st.markdown(f"🏍️ **Moto registrada:** {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'}) | **Placa:** `{cli_meta[8] or 'N/A'}`")
             st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
             if historico:
@@ -643,7 +653,7 @@ elif menu == "👥 Gestão de Clientes":
                         st.write("")
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
-                            btn_salvar_os = st.form_submit_button("💾 SALVAR VALORES E DADOS", use_container_width=True)
+                            btn_salvar_os = st.form_submit_button("💾 SALVAL VALORES E DADOS", use_container_width=True)
                         with col_btn2:
                             btn_del_os = st.form_submit_button("🗑️ EXCLUIR ESTA OS", use_container_width=True)
 
@@ -704,7 +714,7 @@ elif menu == "👥 Gestão de Clientes":
                     c.drawString(40, 650, f"Cliente: {c_meta[0]}")
                     c.setFont("Helvetica", 10)
                     c.drawString(40, 635, f"Telefone: {c_meta[1] or 'N/A'}")
-                    c.drawString(40, 620, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'})")
+                    c.drawString(40, 620, f"Moto: {c_meta[2] or 'N/A'} (Ano: {c_meta[3] or 'N/A'}) - Placa: {c_meta[8] or 'N/A'}")
                     c.drawString(320, 650, f"KM Entrada: {c_meta[4] or 'N/A'}")
                     c.drawString(320, 635, f"KM Saída: {c_meta[5] or 'N/A'}")
                     c.drawString(320, 620, f"Período: {c_meta[6] or 'N/A'} a {c_meta[7] or 'N/A'}")
