@@ -1,15 +1,24 @@
 import streamlit as st
+import sqlite3
+import os
+import io
+import calendar
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor
 
 # Configuração da página do site
 st.set_page_config(
-    page_title="JotaMotors - Oficina Mecânica (Google Sheets)",
+    page_title="JotaMotors - Oficina Mecânica",
     page_icon="🏍️",
     layout="wide"
 )
+
+# BANCO DE DADOS
+BANCO_DADOS = "JotaMotors_Completo.db"
 
 # Identidade Visual do JotaMotors
 COR_BG = "#0f172a"          
@@ -27,10 +36,13 @@ COR_ACCENT_RED = "#ef4444"
 # ==========================================
 st.markdown("""
     <style>
+    /* Estilização dos blocos e espaçamentos */
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 3rem !important;
     }
+    
+    /* Customização dos botões padrões do Streamlit */
     div.stButton > button {
         background-color: #06b6d4 !important;
         color: white !important;
@@ -44,12 +56,16 @@ st.markdown("""
         background-color: #0891b2 !important;
         transform: translateY(-1px);
     }
+    
+    /* Botões vermelhos (como Excluir) */
     div.stButton > button[key*="excluir"] {
         background-color: #ef4444 !important;
     }
     div.stButton > button[key*="excluir"]:hover {
         background-color: #dc2626 !important;
     }
+
+    /* Ajuste para inputs ficarem alinhados */
     .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
         border-color: #334155 !important;
         border-radius: 6px !important;
@@ -58,91 +74,128 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# CONEXÃO COM GOOGLE SHEETS
+# INICIALIZAÇÃO DO BANCO DE DADOS
 # ==========================================
-# Para este código funcionar, você deve configurar o arquivo .streamlit/secrets.toml
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error("Erro ao conectar com o Google Sheets. Verifique suas credenciais em .streamlit/secrets.toml")
-    st.stop()
+def init_db():
+    conexao = sqlite3.connect(BANCO_DADOS, timeout=30)
+    cursor = conexao.cursor()
 
-# Funções auxiliares para leitura e escrita de abas
-def carregar_aba(nome_aba):
-    try:
-        df = conn.read(worksheet=nome_aba, ttl="1m")
-        # Remover colunas ou linhas totalmente vazias que o Sheets às vezes gera
-        df = df.dropna(how='all')
-        return df
-    except Exception:
-        # Se a aba não existir, retorna um DataFrame vazio com colunas padrão
-        if nome_aba == "Produtos":
-            return pd.DataFrame(columns=["ID", "NomeProduto", "Descricao", "Preco", "QtdEstoque"])
-        elif nome_aba == "Clientes":
-            return pd.DataFrame(columns=["ID", "Nome", "Endereco", "Telefone", "ModeloMoto", "AnoMoto", "KMEntrada", "KMSaida", "DataEntrada", "DataSaida", "Placa"])
-        elif nome_aba == "Vendas":
-            return pd.DataFrame(columns=["ID", "ClienteID", "Servico", "ValorTotal", "ValorPago", "DataCompra", "DataHoraEntrada", "DataHoraSaida", "FormaPagamento", "Observacoes"])
-        return pd.DataFrame()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Usuarios(
+        ID INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT UNIQUE, Senha TEXT
+    )""")
 
-def salvar_aba(nome_aba, df):
-    conn.update(worksheet=nome_aba, data=df)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Clientes(
+        ID INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT, Endereco TEXT,
+        Telefone TEXT, ModeloMoto TEXT, AnoMoto TEXT, KM TEXT,
+        KMEntrada TEXT, KMSaida TEXT, DataEntrada TEXT, DataSaida TEXT,
+        Placa TEXT DEFAULT ''
+    )""")
 
-# ==========================================
-# GERAÇÃO DE CÓDIGO E ID SEQUENCIAIS
-# ==========================================
-def proximo_id_produto(df_prod):
-    if df_prod.empty or "ID" not in df_prod.columns:
-        return "PRD-0001"
-    ids = df_prod["ID"].astype(str).tolist()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Vendas(
+        ID INTEGER PRIMARY KEY AUTOINCREMENT, 
+        ClienteID INTEGER, 
+        Servico TEXT,
+        ValorTotal REAL, 
+        ValorPago REAL, 
+        DataCompra TEXT,
+        DataHoraEntrada TEXT,
+        DataHoraSaida TEXT,
+        FormaPagamento TEXT,
+        Observacoes TEXT
+    )""")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Produtos(
+        ID TEXT PRIMARY KEY, NomeProduto TEXT, Descricao TEXT,
+        Preco REAL, QtdEstoque INTEGER DEFAULT NULL
+    )""")
+
+    # MIGRATIONS: Adicionar colunas novas se as tabelas já existiam
+    cursor.execute("PRAGMA table_info(Clientes)")
+    colunas_clientes = [col[1] for col in cursor.fetchall()]
+    if "Placa" not in colunas_clientes:
+        cursor.execute("ALTER TABLE Clientes ADD COLUMN Placa TEXT DEFAULT ''")
+
+    cursor.execute("PRAGMA table_info(Vendas)")
+    colunas_vendas = [col[1] for col in cursor.fetchall()]
+    if "DataHoraEntrada" not in colunas_vendas:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN DataHoraEntrada TEXT DEFAULT ''")
+    if "DataHoraSaida" not in colunas_vendas:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN DataHoraSaida TEXT DEFAULT ''")
+    if "FormaPagamento" not in colunas_vendas:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN FormaPagamento TEXT DEFAULT 'Dinheiro'")
+    if "Observacoes" not in colunas_vendas:
+        cursor.execute("ALTER TABLE Vendas ADD COLUMN Observacoes TEXT DEFAULT ''")
+
+    # Usuários Padrão
+    usuarios_padrao = [('admin', '123'), ('maironxd', '14125'), ('luana', '14125'), ('josue', '123')]
+    for user, senha in usuarios_padrao:
+        cursor.execute("SELECT * FROM Usuarios WHERE Nome=?", (user,))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO Usuarios VALUES (NULL,?,?)", (user, senha))
+
+    conexao.commit()
+    conexao.close()
+
+# Função para gerar o código automático sequencial de produtos (Ex: PRD-0001)
+def gerar_codigo_produto_sequencial():
+    conexao = sqlite3.connect(BANCO_DADOS)
+    cursor = conexao.cursor()
+    cursor.execute("SELECT ID FROM Produtos")
+    ids = [row[0] for row in cursor.fetchall()]
+    conexao.close()
+    
     numeros = []
     for i in ids:
         if i.startswith("PRD-") and i[4:].isdigit():
             numeros.append(int(i[4:]))
+            
     proximo = max(numeros) + 1 if numeros else 1
     return f"PRD-{proximo:04d}"
 
-def proximo_id_numerico(df, coluna="ID"):
-    if df.empty or coluna not in df.columns:
-        return 1
-    # Converte para numérico e pega o maior
-    valores = pd.to_numeric(df[coluna], errors='coerce').dropna()
-    if valores.empty:
-        return 1
-    return int(valores.max() + 1)
+init_db()
 
 # ==========================================
-# CONTROLE DE SESSÃO E LOGIN
+# CONTROLE DE SESSÃO (LOGIN)
 # ==========================================
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'user' not in st.session_state:
     st.session_state['user'] = ""
 
-usuarios_validos = {
-    "admin": "123",
-    "maironxd": "14125",
-    "luana": "14125",
-    "josue": "123"
-}
+def verificar_login(u, p):
+    conexao = sqlite3.connect(BANCO_DADOS)
+    usuario = conexao.execute("SELECT * FROM Usuarios WHERE Nome=? AND Senha=?", (u.strip(), p.strip())).fetchone()
+    conexao.close()
+    return usuario
 
+# Tela de Login Centralizada e Compacta
 if not st.session_state['logged_in']:
     st.write("")
     st.write("")
     st.write("")
-    col_l, col_c, col_r = st.columns([1, 1.2, 1])
-    with col_c:
+    
+    col_lateral_esq, col_login_central, col_lateral_dir = st.columns([1, 1.2, 1])
+    
+    with col_login_central:
         st.markdown("<h1 style='text-align: center; color: #06b6d4; margin-bottom: 0px;'>🔑 JotaMotors ERP</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 20px;'>Planilhas do Google & AppSheet Integrados</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 20px;'>Painel de Gestão e Login Integrado</p>", unsafe_allow_html=True)
         
         with st.container(border=True):
-            with st.form("login_form"):
+            with st.form("login_form", clear_on_submit=False):
                 user_input = st.text_input("Usuário")
                 pass_input = st.text_input("Senha", type="password")
+                st.write("")
                 entrar = st.form_submit_button("ENTRAR NO SISTEMA", use_container_width=True)
+                
                 if entrar:
-                    if user_input.strip() in usuarios_validos and usuarios_validos[user_input.strip()] == pass_input.strip():
+                    usuario_valido = verificar_login(user_input, pass_input)
+                    if usuario_valido:
                         st.session_state['logged_in'] = True
-                        st.session_state['user'] = user_input.strip()
+                        st.session_state['user'] = usuario_valido[1]
                         st.success("Acesso autorizado! Carregando...")
                         st.rerun()
                     else:
@@ -150,8 +203,10 @@ if not st.session_state['logged_in']:
     st.stop()
 
 # ==========================================
-# NAVEGAÇÃO E INTERFACE PRINCIPAL
+# CÓDIGO DO SISTEMA (APÓS LOGIN)
 # ==========================================
+
+# Barra Lateral de Navegação
 st.sidebar.markdown(f"### 👤 Usuário: **{st.session_state['user']}**")
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state['logged_in'] = False
@@ -164,46 +219,43 @@ menu = st.sidebar.radio(
     ["📊 Dashboard & Estoque", "👥 Gestão de Clientes", "📈 Desempenho do Mês"]
 )
 
-col_logo, _ = st.columns([2, 1])
+# Cabeçalho Fixo do JotaMotors
+col_logo, col_logo_dir = st.columns([2, 1])
 with col_logo:
     st.markdown("<h1 style='color: #06b6d4; margin-bottom: 0px; padding-bottom:0px;'>JotaMotors</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #94a3b8; font-size: 13px; margin-top:0px;'>SISTEMA INTEGRADO COM GOOGLE SHEETS</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #94a3b8; font-size: 13px; margin-top:0px;'>SISTEMA DE GERENCIAMENTO DE OFICINA</p>", unsafe_allow_html=True)
 
 st.divider()
-
-# ==========================================
-# CARREGAMENTO DOS DADOS DO GOOGLE SHEETS
-# ==========================================
-df_produtos = carregar_aba("Produtos")
-df_clientes = carregar_aba("Clientes")
-df_vendas = carregar_aba("Vendas")
-
-# Garantir tipos de dados corretos para as operações
-if not df_produtos.empty:
-    df_produtos["Preco"] = pd.to_numeric(df_produtos["Preco"], errors="coerce").fillna(0.0)
-    df_produtos["QtdEstoque"] = pd.to_numeric(df_produtos["QtdEstoque"], errors="coerce").fillna(0).astype(int)
-
-if not df_vendas.empty:
-    df_vendas["ValorTotal"] = pd.to_numeric(df_vendas["ValorTotal"], errors="coerce").fillna(0.0)
-    df_vendas["ValorPago"] = pd.to_numeric(df_vendas["ValorPago"], errors="coerce").fillna(0.0)
 
 # ==========================================
 # ABA 1: DASHBOARD & ESTOQUE
 # ==========================================
 if menu == "📊 Dashboard & Estoque":
-    # Estatísticas do estoque e faturamento do mês atual
-    total_produtos = len(df_produtos)
-    total_itens = df_produtos["QtdEstoque"].sum() if not df_produtos.empty else 0
-    valor_estoque = (df_produtos["Preco"] * df_produtos["QtdEstoque"]).sum() if not df_produtos.empty else 0.0
-    estoque_baixo = len(df_produtos[df_produtos["QtdEstoque"] <= 3]) if not df_produtos.empty else 0
     
-    # Faturamento no mês atual (baseado em DataCompra com formato DD/MM/AAAA)
+    conexao = sqlite3.connect(BANCO_DADOS)
+    cursor = conexao.cursor()
+    cursor.execute("SELECT * FROM Produtos")
+    dados_produtos = cursor.fetchall()
+    
     mes_atual = datetime.now().strftime("/%m/%Y")
-    if not df_vendas.empty and "DataCompra" in df_vendas.columns:
-        filtro_mes = df_vendas["DataCompra"].astype(str).str.contains(mes_atual, na=False)
-        lucro_mes = df_vendas.loc[filtro_mes, "ValorPago"].sum()
-    else:
-        lucro_mes = 0.0
+    cursor.execute("SELECT ValorPago FROM Vendas WHERE DataCompra LIKE ?", (f"%{mes_atual}%",))
+    vendas_mes = cursor.fetchall()
+    lucro_mes = sum([v[0] for v in vendas_mes if v[0] is not None])
+    conexao.close()
+    
+    total_produtos = len(dados_produtos)
+    total_itens = 0
+    valor_estoque = 0.0
+    estoque_baixo = 0
+    
+    for d in dados_produtos:
+        v_preco = d[3] if d[3] is not None else 0.0
+        v_qtd = d[4]
+        if v_qtd is not None and str(v_qtd).isdigit():
+            total_itens += int(v_qtd)
+            valor_estoque += float(v_preco) * int(v_qtd)
+            if int(v_qtd) <= 3: 
+                estoque_baixo += 1
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -220,24 +272,79 @@ if menu == "📊 Dashboard & Estoque":
             st.metric("⚠️ Alerta Estoque Baixo", f"{estoque_baixo} itens", delta="- Crítico" if estoque_baixo > 0 else "OK", delta_color="inverse")
 
     st.write("")
-    st.subheader("📦 Consulta de Estoque de Peças (Sincronizado com Google Sheets)")
     
-    busca_prod = st.text_input("🔎 Digite para pesquisar produto (Código ou Nome):", placeholder="Buscar por código ou nome do produto...")
+    st.subheader("📦 Consulta de Estoque de Peças")
     
-    df_exibicao_prod = df_produtos.copy()
-    if busca_prod and not df_exibicao_prod.empty:
-        df_exibicao_prod = df_exibicao_prod[
-            df_exibicao_prod['ID'].astype(str).str.contains(busca_prod, case=False) | 
-            df_exibicao_prod['NomeProduto'].astype(str).str.contains(busca_prod, case=False)
+    df_prod = pd.DataFrame(dados_produtos, columns=["CÓDIGO/ID", "NOME DO PRODUTO", "DESCRIÇÃO", "PREÇO R$", "QTD ESTOQUE"])
+    
+    col_filtro, col_b1, col_b2 = st.columns([3, 1, 1])
+    with col_filtro:
+        busca_prod = st.text_input("🔎 Digite para pesquisar produto (Código ou Nome):", label_visibility="collapsed", placeholder="Buscar por código ou nome do produto...")
+    
+    if busca_prod:
+        df_prod = df_prod[
+            df_prod['CÓDIGO/ID'].astype(str).str.contains(busca_prod, case=False) | 
+            df_prod['NOME DO PRODUTO'].astype(str).str.contains(busca_prod, case=False)
         ]
     
-    st.dataframe(df_exibicao_prod, use_container_width=True, hide_index=True)
+    st.dataframe(df_prod, use_container_width=True, hide_index=True)
 
+    with col_b1:
+        csv_data = df_prod.to_csv(index=False, sep=';').encode('utf-8-sig')
+        st.download_button(
+            label="📊 Baixar Excel (CSV)",
+            data=csv_data,
+            file_name="estoque_jotamotors.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+    with col_b2:
+        def exportar_produtos_pdf_bytes(dados):
+            buffer = io.BytesIO()
+            c = canvas.Canvas(buffer, pagesize=letter)
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(50, 750, "RELATÓRIO DE ESTOQUE - JOTAMOTORS")
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(50, 720, "CÓDIGO")
+            c.drawString(150, 720, "PRODUTO")
+            c.drawString(350, 720, "PREÇO")
+            c.drawString(450, 720, "ESTOQUE")
+            c.line(50, 715, 550, 715)
+
+            y = 700
+            c.setFont("Helvetica", 10)
+            for d in dados:
+                if y < 50:
+                    c.showPage()
+                    y = 750
+                c.drawString(50, y, str(d[0]))
+                c.drawString(150, y, str(d[1])[:35])
+                c.drawString(350, y, f"R$ {d[3]:.2f}")
+                c.drawString(450, y, str(d[4] if d[4] is not None else "Aberto"))
+                y -= 20
+            c.save()
+            buffer.seek(0)
+            return buffer.getvalue()
+        
+        pdf_estoque = exportar_produtos_pdf_bytes(dados_produtos)
+        st.download_button(
+            label="📕 Baixar PDF Estoque",
+            data=pdf_estoque,
+            file_name="estoque_jotamotors.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+    st.divider()
+    
     col_cad, col_ed = st.columns(2)
 
     with col_cad:
         st.markdown("### ➕ Novo Cadastro")
-        sugestao_codigo = proximo_id_produto(df_produtos)
+        
+        # Geração de código automática para sugestão no campo
+        sugestao_codigo = gerar_codigo_produto_sequencial()
         
         with st.container(border=True):
             with st.form("form_add_prod", clear_on_submit=True):
@@ -251,37 +358,33 @@ if menu == "📊 Dashboard & Estoque":
                 if salvar_novo:
                     if not new_cod.strip() or not new_nome.strip():
                         st.warning("Código e Nome são obrigatórios!")
-                    elif not df_produtos.empty and new_cod.strip().upper() in df_produtos["ID"].astype(str).values:
-                        st.error("Este Código/ID já existe na planilha do Google Sheets!")
                     else:
-                        novo_item = pd.DataFrame([{
-                            "ID": new_cod.strip().upper(),
-                            "NomeProduto": new_nome.strip(),
-                            "Descricao": new_desc.strip(),
-                            "Preco": new_preco,
-                            "QtdEstoque": int(new_qtd)
-                        }])
-                        df_atualizado = pd.concat([df_produtos, novo_item], ignore_index=True)
-                        salvar_aba("Produtos", df_atualizado)
-                        st.success("Produto gravado no Google Sheets!")
-                        st.rerun()
+                        try:
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("INSERT INTO Produtos (ID, NomeProduto, Descricao, Preco, QtdEstoque) VALUES (?, ?, ?, ?, ?)",
+                                           (new_cod.strip().upper(), new_nome.strip(), new_desc.strip(), new_preco, new_qtd))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Produto adicionado com sucesso!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("Este Código/ID já existe no banco de dados!")
 
     with col_ed:
         st.markdown("### ✏️ Modificar Produto")
         with st.container(border=True):
-            prod_ids = df_produtos["ID"].astype(str).tolist() if not df_produtos.empty else []
+            prod_ids = [p[0] for p in dados_produtos]
             selected_prod_id = st.selectbox("Escolha um produto para editar", [""] + prod_ids)
             
             if selected_prod_id:
-                idx_prod = df_produtos[df_produtos["ID"] == selected_prod_id].index[0]
-                selected_prod = df_produtos.loc[idx_prod]
-                
+                selected_prod = [p for p in dados_produtos if p[0] == selected_prod_id][0]
                 with st.form("form_edit_prod"):
-                    st.info(f"Editando Produto: {selected_prod['ID']}")
-                    edit_nome = st.text_input("Nome do Produto", value=selected_prod['NomeProduto'])
-                    edit_desc = st.text_input("Descrição", value=str(selected_prod['Descricao']) if pd.notna(selected_prod['Descricao']) else "")
-                    edit_preco = st.number_input("Preço Unitário (R$)", min_value=0.0, step=0.01, value=float(selected_prod['Preco']))
-                    edit_qtd = st.number_input("Quantidade em Estoque", min_value=0, step=1, value=int(selected_prod['QtdEstoque']))
+                    st.info(f"Editando Produto: {selected_prod[0]}")
+                    edit_nome = st.text_input("Nome do Produto", value=selected_prod[1])
+                    edit_desc = st.text_input("Descrição", value=selected_prod[2] or "")
+                    edit_preco = st.number_input("Preço Unitário (R$)", min_value=0.0, step=0.01, value=float(selected_prod[3] or 0.0))
+                    edit_qtd = st.number_input("Quantidade em Estoque", min_value=0, step=1, value=int(selected_prod[4]) if selected_prod[4] is not None else 0)
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
@@ -293,18 +396,22 @@ if menu == "📊 Dashboard & Estoque":
                         if not edit_nome.strip():
                             st.warning("O nome não pode ser vazio!")
                         else:
-                            df_produtos.at[idx_prod, "NomeProduto"] = edit_nome.strip()
-                            df_produtos.at[idx_prod, "Descricao"] = edit_desc.strip()
-                            df_produtos.at[idx_prod, "Preco"] = edit_preco
-                            df_produtos.at[idx_prod, "QtdEstoque"] = int(edit_qtd)
-                            salvar_aba("Produtos", df_produtos)
-                            st.success("Produto atualizado no Google Sheets!")
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("UPDATE Produtos SET NomeProduto=?, Descricao=?, Preco=?, QtdEstoque=? WHERE ID=?",
+                                           (edit_nome.strip(), edit_desc.strip(), edit_preco, edit_qtd, selected_prod_id))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Alterações salvas!")
                             st.rerun()
                             
                     if btn_excluir:
-                        df_produtos = df_produtos.drop(idx_prod)
-                        salvar_aba("Produtos", df_produtos)
-                        st.success("Produto removido do Google Sheets!")
+                        conexao = sqlite3.connect(BANCO_DADOS)
+                        cursor = conexao.cursor()
+                        cursor.execute("DELETE FROM Produtos WHERE ID=?", (selected_prod_id,))
+                        conexao.commit()
+                        conexao.close()
+                        st.success("Produto removido!")
                         st.rerun()
 
 # ==========================================
@@ -313,17 +420,23 @@ if menu == "📊 Dashboard & Estoque":
 elif menu == "👥 Gestão de Clientes":
     st.subheader("👥 Fichas de Clientes e Ordens de Serviços")
     
-    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Nome, Modelo ou Placa da Moto):", placeholder="Ex: Honda CG, João, ABC1D23...")
-    df_exibicao_cli = df_clientes.copy()
+    conexao = sqlite3.connect(BANCO_DADOS)
+    cursor = conexao.cursor()
+    cursor.execute("SELECT ID, Nome, Telefone, ModeloMoto, AnoMoto, DataEntrada, DataSaida, Placa FROM Clientes")
+    dados_clientes = cursor.fetchall()
+    conexao.close()
     
-    if busca_cli and not df_exibicao_cli.empty:
-        df_exibicao_cli = df_exibicao_cli[
-            df_exibicao_cli['Nome'].astype(str).str.contains(busca_cli, case=False) |
-            df_exibicao_cli['ModeloMoto'].astype(str).str.contains(busca_cli, case=False) |
-            df_exibicao_cli['Placa'].astype(str).str.contains(busca_cli, case=False)
+    df_cli = pd.DataFrame(dados_clientes, columns=["ID", "Nome do Cliente", "Telefone", "Modelo Moto", "Ano Moto", "Data Entrada", "Data Saída", "Placa"])
+    
+    busca_cli = st.text_input("🔎 Pesquisar Ficha de Clientes (Busque por Nome, Modelo ou Placa da Moto):", placeholder="Ex: Honda CG, João, ABC1D23...")
+    if busca_cli:
+        df_cli = df_cli[
+            df_cli['Nome do Cliente'].astype(str).str.contains(busca_cli, case=False) |
+            df_cli['Modelo Moto'].astype(str).str.contains(busca_cli, case=False) |
+            df_cli['Placa'].astype(str).str.contains(busca_cli, case=False)
         ]
         
-    st.dataframe(df_exibicao_cli, use_container_width=True, hide_index=True)
+    st.dataframe(df_cli, use_container_width=True, hide_index=True)
 
     st.divider()
     
@@ -355,28 +468,20 @@ elif menu == "👥 Gestão de Clientes":
                     if not c_nome.strip():
                         st.warning("Nome do cliente é obrigatório!")
                     else:
-                        prox_id = proximo_id_numerico(df_clientes, "ID")
-                        novo_cli = pd.DataFrame([{
-                            "ID": prox_id,
-                            "Nome": c_nome.strip(),
-                            "Endereco": c_end.strip(),
-                            "Telefone": c_tel.strip(),
-                            "ModeloMoto": c_mod.strip(),
-                            "AnoMoto": c_ano.strip(),
-                            "KMEntrada": c_kme.strip(),
-                            "KMSaida": c_kms.strip(),
-                            "DataEntrada": c_dent.strip(),
-                            "DataSaida": c_dsai.strip(),
-                            "Placa": c_pla.strip().upper()
-                        }])
-                        df_atualizado = pd.concat([df_clientes, novo_cli], ignore_index=True)
-                        salvar_aba("Clientes", df_atualizado)
-                        st.success("Cliente salvo com sucesso no Google Sheets!")
+                        conexao = sqlite3.connect(BANCO_DADOS)
+                        cursor = conexao.cursor()
+                        cursor.execute("""
+                            INSERT INTO Clientes (Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (c_nome.strip(), c_end.strip(), c_tel.strip(), c_mod.strip(), c_ano.strip(), c_kme.strip(), c_kms.strip(), c_dent.strip(), c_dsai.strip(), c_pla.strip().upper()))
+                        conexao.commit()
+                        conexao.close()
+                        st.success("Ficha cadastrada com sucesso!")
                         st.rerun()
 
         st.markdown("### 🛠️ Registrar Ordem de Serviço (Venda)")
         with st.container(border=True):
-            cli_dict = {f"{row['Nome']} (ID: {row['ID']})": row['ID'] for _, row in df_clientes.iterrows()} if not df_clientes.empty else {}
+            cli_dict = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
             sel_cli_venda = st.selectbox("Escolha o Cliente para associar a OS", [""] + list(cli_dict.keys()))
             
             if sel_cli_venda:
@@ -398,8 +503,17 @@ elif menu == "👥 Gestão de Clientes":
                     with col_os2:
                         os_pago = st.number_input("Valor Pago de Adiantamento (R$)", min_value=0.0, step=0.01)
                     
-                    os_forma_pagamento = st.selectbox("Forma de Pagamento", options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"])
-                    os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente")
+                    col_p_obs1, col_p_obs2 = st.columns([1, 1])
+                    with col_p_obs1:
+                        os_forma_pagamento = st.selectbox(
+                            "Forma de Pagamento", 
+                            options=["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
+                        )
+                    
+                    with col_p_obs2:
+                        st.write("")
+
+                    os_obs_extra = st.text_area("Anotação / Observação Extra para o Cliente", placeholder="Escreva observações aqui...")
 
                     st.write("")
                     gravar_os = st.form_submit_button("LANÇAR ORDEM DE SERVIÇO", use_container_width=True)
@@ -411,51 +525,50 @@ elif menu == "👥 Gestão de Clientes":
                             entrada_completa = f"{os_dt_entrada.strftime('%d/%m/%Y')} {os_hr_entrada.strftime('%H:%M')}"
                             saida_completa = f"{os_dt_saida.strftime('%d/%m/%Y')} {os_hr_saida.strftime('%H:%M')}"
                             
-                            prox_id_venda = proximo_id_numerico(df_vendas, "ID")
-                            nova_os = pd.DataFrame([{
-                                "ID": prox_id_venda,
-                                "ClienteID": target_cli_id,
-                                "Servico": os_desc.strip(),
-                                "ValorTotal": os_total,
-                                "ValorPago": os_pago,
-                                "DataCompra": data_atual,
-                                "DataHoraEntrada": entrada_completa,
-                                "DataHoraSaida": saida_completa,
-                                "FormaPagamento": os_forma_pagamento,
-                                "Observacoes": os_obs_extra.strip()
-                            }])
-                            df_atualizado = pd.concat([df_vendas, nova_os], ignore_index=True)
-                            salvar_aba("Vendas", df_atualizado)
-                            st.success("Ordem de serviço registrada no Google Sheets!")
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("""
+                                INSERT INTO Vendas (
+                                    ClienteID, Servico, ValorTotal, ValorPago, DataCompra, 
+                                    DataHoraEntrada, DataHoraSaida, FormaPagamento, Observacoes
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                target_cli_id, os_desc.strip(), os_total, os_pago, data_atual,
+                                entrada_completa, saida_completa, os_forma_pagamento, os_obs_extra.strip()
+                            ))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ordem de serviço registrada com sucesso!")
                             st.rerun()
 
     with col_c2:
         st.markdown("### ✏️ Alterar ou Remover Cliente")
         with st.container(border=True):
-            cli_dict_ed = {f"{row['Nome']} (ID: {row['ID']})": row['ID'] for _, row in df_clientes.iterrows()} if not df_clientes.empty else {}
+            cli_dict_ed = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
             sel_cli_ed = st.selectbox("Escolha o cliente para atualizar", [""] + list(cli_dict_ed.keys()))
             
             if sel_cli_ed:
                 target_cli_id = cli_dict_ed[sel_cli_ed]
-                idx_cli = df_clientes[df_clientes["ID"] == target_cli_id].index[0]
-                c_info = df_clientes.loc[idx_cli]
+                conexao = sqlite3.connect(BANCO_DADOS)
+                c_info = conexao.execute("SELECT Nome, Endereco, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa FROM Clientes WHERE ID=?", (target_cli_id,)).fetchone()
+                conexao.close()
                 
                 with st.form("form_edit_cli"):
-                    ec_nome = st.text_input("Nome Completo", value=c_info["Nome"])
-                    ec_end = st.text_input("Endereço Completo", value=str(c_info["Endereco"]) if pd.notna(c_info["Endereco"]) else "")
-                    ec_tel = st.text_input("Telefone de Contato", value=str(c_info["Telefone"]) if pd.notna(c_info["Telefone"]) else "")
+                    ec_nome = st.text_input("Nome Completo", value=c_info[0] or "")
+                    ec_end = st.text_input("Endereço Completo", value=c_info[1] or "")
+                    ec_tel = st.text_input("Telefone de Contato", value=c_info[2] or "")
                     
                     col_me1, col_me2 = st.columns(2)
                     with col_me1:
-                        ec_mod = st.text_input("Modelo da Moto", value=str(c_info["ModeloMoto"]) if pd.notna(c_info["ModeloMoto"]) else "")
-                        ec_pla = st.text_input("Placa da Moto", value=str(c_info["Placa"]) if pd.notna(c_info["Placa"]) else "")  
-                        ec_kme = st.text_input("KM Entrada", value=str(c_info["KMEntrada"]) if pd.notna(c_info["KMEntrada"]) else "")
-                        ec_dent = st.text_input("Data Entrada", value=str(c_info["DataEntrada"]) if pd.notna(c_info["DataEntrada"]) else "")
+                        ec_mod = st.text_input("Modelo da Moto", value=c_info[3] or "")
+                        ec_pla = st.text_input("Placa da Moto", value=c_info[9] or "")  
+                        ec_kme = st.text_input("KM Entrada", value=c_info[5] or "")
+                        ec_dent = st.text_input("Data Entrada", value=c_info[7] or "")
                     with col_me2:
-                        ec_ano = st.text_input("Ano Moto", value=str(c_info["AnoMoto"]) if pd.notna(c_info["AnoMoto"]) else "")
+                        ec_ano = st.text_input("Ano Moto", value=c_info[4] or "")
                         st.write("")  
-                        ec_kms = st.text_input("KM Saída", value=str(c_info["KMSaida"]) if pd.notna(c_info["KMSaida"]) else "")
-                        ec_dsai = st.text_input("Data Saída", value=str(c_info["DataSaida"]) if pd.notna(c_info["DataSaida"]) else "")
+                        ec_kms = st.text_input("KM Saída", value=c_info[6] or "")
+                        ec_dsai = st.text_input("Data Saída", value=c_info[8] or "")
                     
                     st.write("")
                     col_bcli1, col_bcli2 = st.columns(2)
@@ -468,84 +581,91 @@ elif menu == "👥 Gestão de Clientes":
                         if not ec_nome.strip():
                             st.warning("O Nome é obrigatório!")
                         else:
-                            df_clientes.at[idx_cli, "Nome"] = ec_nome.strip()
-                            df_clientes.at[idx_cli, "Endereco"] = ec_end.strip()
-                            df_clientes.at[idx_cli, "Telefone"] = ec_tel.strip()
-                            df_clientes.at[idx_cli, "ModeloMoto"] = ec_mod.strip()
-                            df_clientes.at[idx_cli, "AnoMoto"] = ec_ano.strip()
-                            df_clientes.at[idx_cli, "KMEntrada"] = ec_kme.strip()
-                            df_clientes.at[idx_cli, "KMSaida"] = ec_kms.strip()
-                            df_clientes.at[idx_cli, "DataEntrada"] = ec_dent.strip()
-                            df_clientes.at[idx_cli, "DataSaida"] = ec_dsai.strip()
-                            df_clientes.at[idx_cli, "Placa"] = ec_pla.strip().upper()
-                            
-                            salvar_aba("Clientes", df_clientes)
-                            st.success("Ficha atualizada no Google Sheets!")
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("""
+                                UPDATE Clientes SET Nome=?, Endereco=?, Telefone=?, ModeloMoto=?, AnoMoto=?, KMEntrada=?, KMSaida=?, DataEntrada=?, DataSaida=?, Placa=?
+                                WHERE ID=?
+                            """, (ec_nome.strip(), ec_end.strip(), ec_tel.strip(), ec_mod.strip(), ec_ano.strip(), ec_kme.strip(), ec_kms.strip(), ec_dent.strip(), ec_dsai.strip(), ec_pla.strip().upper(), target_cli_id))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ficha atualizada com sucesso!")
                             st.rerun()
                             
                     if submit_del_cli:
-                        # Remove o cliente e suas OS vinculadas
-                        df_clientes = df_clientes.drop(idx_cli)
-                        if not df_vendas.empty:
-                            df_vendas = df_vendas[df_vendas["ClienteID"] != target_cli_id]
-                            salvar_aba("Vendas", df_vendas)
-                        salvar_aba("Clientes", df_clientes)
-                        st.success("Cliente e OSs associadas removidas!")
+                        conexao = sqlite3.connect(BANCO_DADOS)
+                        cursor = conexao.cursor()
+                        cursor.execute("DELETE FROM Clientes WHERE ID=?", (target_cli_id,))
+                        cursor.execute("DELETE FROM Vendas WHERE ClienteID=?", (target_cli_id,))
+                        conexao.commit()
+                        conexao.close()
+                        st.success("Cliente removido permanentemente!")
                         st.rerun()
 
     # Histórico de Serviços / Gerador de Extrato
     st.divider()
     st.subheader("📜 Extrato e Histórico de Prontuários")
     
-    cli_dict_h = {f"{row['Nome']} (ID: {row['ID']})": row['ID'] for _, row in df_clientes.iterrows()} if not df_clientes.empty else {}
+    cli_dict_h = {f"{c[1]} (ID: {c[0]})": c[0] for c in dados_clientes}
     sel_cli_hist = st.selectbox("Selecione o Cliente para detalhar o extrato financeiro", [""] + list(cli_dict_h.keys()))
     
     if sel_cli_hist:
         cli_id_h = cli_dict_h[sel_cli_hist]
+        conexao = sqlite3.connect(BANCO_DADOS)
+        cursor = conexao.cursor()
+        cursor.execute("""
+            SELECT ID, DataCompra, Servico, ValorTotal, ValorPago, DataHoraEntrada, DataHoraSaida, FormaPagamento, Observacoes 
+            FROM Vendas WHERE ClienteID=? ORDER BY ID DESC
+        """, (cli_id_h,))
+        historico = cursor.fetchall()
         
-        # Filtra histórico de vendas do cliente
-        historico = df_vendas[df_vendas["ClienteID"].astype(str) == str(cli_id_h)] if not df_vendas.empty else pd.DataFrame()
-        cli_meta = df_clientes[df_clientes["ID"] == cli_id_h].iloc[0]
+        # Meta informações com a Placa integrada
+        cli_meta = cursor.execute("SELECT Nome, Telefone, ModeloMoto, AnoMoto, KMEntrada, KMSaida, DataEntrada, DataSaida, Placa FROM Clientes WHERE ID=?", (cli_id_h,)).fetchone()
+        conexao.close()
         
         with st.container(border=True):
-            st.markdown(f"🏍️ **Moto registrada:** {cli_meta['ModeloMoto'] or 'Não cadastrada'} (Ano: {cli_meta['AnoMoto'] or 'N/A'}) | **Placa:** `{cli_meta['Placa'] or 'N/A'}`")
-            st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta['KMEntrada'] or '-'}` / `{cli_meta['KMSaida'] or '-'}` | **Entrada/Saída Oficina:** {cli_meta['DataEntrada'] or '-'} a {cli_meta['DataSaida'] or '-'}")
+            st.markdown(f"🏍️ **Moto registrada:** {cli_meta[2] or 'Não cadastrada'} (Ano: {cli_meta[3] or 'N/A'}) | **Placa:** `{cli_meta[8] or 'N/A'}`")
+            st.markdown(f"📍 **KM Entrada / Saída:** `{cli_meta[4] or '-'}` / `{cli_meta[5] or '-'}` | **Entrada/Saída Oficina:** {cli_meta[6] or '-'} a {cli_meta[7] or '-'}")
             
-            if not historico.empty:
-                st.dataframe(historico, use_container_width=True, hide_index=True)
+            if historico:
+                df_hist = pd.DataFrame(historico, columns=[
+                    "OS #", "Data Lançamento", "Serviços & Peças de Reposição", 
+                    "Total Orçado (R$)", "Total Pago (R$)", "Entrada Oficial", "Saída Oficial", "Forma Pagamento", "Anotações / Obs"
+                ])
+                st.dataframe(df_hist, use_container_width=True, hide_index=True)
                 
+                # --- SESSÃO CORRIGIDA/COMPLETADA: EDITAR OU EXCLUIR OS ---
                 st.markdown("### ✏️ Editar ou Excluir Lançamento (OS)")
-                os_dict = {f"OS #{row['ID']} - {row['Servico']}"[:50] + "...": row['ID'] for _, row in historico.iterrows()}
+                os_dict = {f"OS #{d[0]} - {d[2]}"[:50] + "...": d[0] for d in historico}
                 sel_os_ed = st.selectbox("Selecione a Ordem de Serviço que deseja alterar ou excluir:", [""] + list(os_dict.keys()))
                 
                 if sel_os_ed:
                     os_id_target = os_dict[sel_os_ed]
-                    idx_os = df_vendas[df_vendas["ID"] == os_id_target].index[0]
-                    cur_os = df_vendas.loc[idx_os]
+                    cur_os = [d for d in historico if d[0] == os_id_target][0]
                     
                     with st.form("form_edit_os"):
                         st.info(f"Alterando OS #{os_id_target}")
-                        edit_servico = st.text_input("Serviços & Peças de Reposição", value=cur_os['Servico'])
+                        edit_servico = st.text_input("Serviços & Peças de Reposição", value=cur_os[2])
                         
                         col_v1, col_v2 = st.columns(2)
                         with col_v1:
-                            edit_vtotal = st.number_input("Total Orçado (R$)", value=float(cur_os['ValorTotal']), step=0.01)
+                            edit_vtotal = st.number_input("Total Orçado (R$)", value=float(cur_os[3] or 0.0), step=0.01)
                         with col_v2:
-                            edit_vpago = st.number_input("Total Pago (R$)", value=float(cur_os['ValorPago']), step=0.01)
+                            edit_vpago = st.number_input("Total Pago (R$)", value=float(cur_os[4] or 0.0), step=0.01)
 
                         col_dt1, col_dt2 = st.columns(2)
                         with col_dt1:
-                            edit_ent = st.text_input("Entrada Oficial", value=str(cur_os['DataHoraEntrada']) if pd.notna(cur_os['DataHoraEntrada']) else "")
+                            edit_ent = st.text_input("Entrada Oficial", value=cur_os[5] or "")
                         with col_dt2:
-                            edit_sai = st.text_input("Saída Oficial", value=str(cur_os['DataHoraSaida']) if pd.notna(cur_os['DataHoraSaida']) else "")
+                            edit_sai = st.text_input("Saída Oficial", value=cur_os[6] or "")
 
                         col_f1, col_f2 = st.columns(2)
                         with col_f1:
                             opcoes_pgto = ["Dinheiro", "Pix", "Cartão débito", "Cartão crédito"]
-                            idx_pgto = opcoes_pgto.index(cur_os['FormaPagamento']) if cur_os['FormaPagamento'] in opcoes_pgto else 0
+                            idx_pgto = opcoes_pgto.index(cur_os[7]) if cur_os[7] in opcoes_pgto else 0
                             edit_forma = st.selectbox("Forma de Pagamento", opcoes_pgto, index=idx_pgto)
                         with col_f2:
-                            edit_obs = st.text_area("Anotações / Obs", value=str(cur_os['Observacoes']) if pd.notna(cur_os['Observacoes']) else "", height=68)
+                            edit_obs = st.text_area("Anotações / Obs", value=cur_os[8] or "", height=68)
 
                         st.write("")
                         col_btn1, col_btn2 = st.columns(2)
@@ -558,39 +678,54 @@ elif menu == "👥 Gestão de Clientes":
                             if not edit_servico.strip():
                                 st.warning("A descrição do serviço não pode ficar vazia!")
                             else:
-                                df_vendas.at[idx_os, "Servico"] = edit_servico.strip()
-                                df_vendas.at[idx_os, "ValorTotal"] = edit_vtotal
-                                df_vendas.at[idx_os, "ValorPago"] = edit_vpago
-                                df_vendas.at[idx_os, "DataHoraEntrada"] = edit_ent.strip()
-                                df_vendas.at[idx_os, "DataHoraSaida"] = edit_sai.strip()
-                                df_vendas.at[idx_os, "FormaPagamento"] = edit_forma
-                                df_vendas.at[idx_os, "Observacoes"] = edit_obs.strip()
-                                
-                                salvar_aba("Vendas", df_vendas)
-                                st.success("Ordem de serviço salva no Google Sheets!")
+                                conexao = sqlite3.connect(BANCO_DADOS)
+                                cursor = conexao.cursor()
+                                cursor.execute("""
+                                    UPDATE Vendas
+                                    SET Servico=?, ValorTotal=?, ValorPago=?, DataHoraEntrada=?, DataHoraSaida=?, FormaPagamento=?, Observacoes=?
+                                    WHERE ID=?
+                                """, (edit_servico.strip(), edit_vtotal, edit_vpago, edit_ent.strip(), edit_sai.strip(), edit_forma, edit_obs.strip(), os_id_target))
+                                conexao.commit()
+                                conexao.close()
+                                st.success("Ordem de serviço atualizada com sucesso!")
                                 st.rerun()
 
                         if btn_del_os:
-                            df_vendas = df_vendas.drop(idx_os)
-                            salvar_aba("Vendas", df_vendas)
-                            st.success("Ordem de serviço removida do Google Sheets!")
+                            conexao = sqlite3.connect(BANCO_DADOS)
+                            cursor = conexao.cursor()
+                            cursor.execute("DELETE FROM Vendas WHERE ID=?", (os_id_target,))
+                            conexao.commit()
+                            conexao.close()
+                            st.success("Ordem de serviço excluída com sucesso!")
                             st.rerun()
             else:
                 st.info("Nenhum histórico financeiro de OS encontrado para este cliente.")
 
 # ==========================================
-# ABA 3: DESEMPENHO DO MÊS
+# ABA 3: DESEMPENHO DO MÊS (COMPLEMENTADA)
 # ==========================================
 elif menu == "📈 Desempenho do Mês":
-    st.subheader("📈 Controle e Desempenho Financeiro (Dados da Nuvem)")
+    st.subheader("📈 Controle e Desempenho Financeiro")
     
-    if not df_vendas.empty:
-        df_completo_vendas = df_vendas.copy()
-        if not df_clientes.empty:
-            df_completo_vendas = df_vendas.merge(df_clientes[["ID", "Nome"]], left_on="ClienteID", right_on="ID", how="left", suffixes=('', '_cli'))
+    conexao = sqlite3.connect(BANCO_DADOS)
+    cursor = conexao.cursor()
+    cursor.execute("""
+        SELECT V.ID, C.Nome, V.Servico, V.ValorTotal, V.ValorPago, V.DataCompra, V.FormaPagamento 
+        FROM Vendas V
+        LEFT JOIN Clientes C ON V.ClienteID = C.ID
+        ORDER BY V.ID DESC
+    """)
+    dados_vendas = cursor.fetchall()
+    conexao.close()
+    
+    if dados_vendas:
+        df_vendas = pd.DataFrame(dados_vendas, columns=["OS #", "Cliente", "Serviço", "Total (R$)", "Pago (R$)", "Data", "Pagamento"])
         
-        total_faturado = df_completo_vendas["ValorTotal"].sum()
-        total_recebido = df_completo_vendas["ValorPago"].sum()
+        # Filtro de Ano/Mês
+        st.markdown("### 📊 Estatísticas Gerais")
+        
+        total_faturado = df_vendas["Total (R$)"].sum()
+        total_recebido = df_vendas["Pago (R$)"].sum()
         total_pendente = total_faturado - total_recebido
         
         m1, m2, m3 = st.columns(3)
@@ -607,9 +742,9 @@ elif menu == "📈 Desempenho do Mês":
         
         with col_graficos1:
             st.markdown("#### 💳 Meios de Pagamento mais utilizados")
-            meios_pgto = df_completo_vendas.groupby("FormaPagamento")["ValorTotal"].sum()
+            meios_pgto = df_vendas.groupby("Pagamento")["Total (R$)"].sum()
             fig, ax = plt.subplots(figsize=(6, 4))
-            fig.patch.set_facecolor('#1e293b') 
+            fig.patch.set_facecolor('#1e293b') # COR_CARD
             ax.set_facecolor('#1e293b')
             
             meios_pgto.plot(kind="bar", color="#06b6d4", ax=ax)
@@ -624,9 +759,7 @@ elif menu == "📈 Desempenho do Mês":
             
         with col_graficos2:
             st.markdown("#### Últimas Ordens de Serviço Registradas")
-            colunas_exibir = ["ID", "Nome", "Servico", "ValorTotal", "ValorPago", "DataCompra", "FormaPagamento"]
-            colunas_existentes = [c for c in colunas_exibir if c in df_completo_vendas.columns]
-            st.dataframe(df_completo_vendas[colunas_existentes].head(10), use_container_width=True, hide_index=True)
+            st.dataframe(df_vendas.head(10), use_container_width=True, hide_index=True)
             
     else:
         st.info("Nenhuma ordem de serviço foi lançada ainda para computar o desempenho do mês.")
